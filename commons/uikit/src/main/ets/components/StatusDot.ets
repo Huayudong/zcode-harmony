@@ -16,7 +16,8 @@ export enum StatusTone {
 @Component
 export struct StatusDot {
   @Prop tone: StatusTone = StatusTone.Offline;
-  @Prop size: number = 10;
+  // 避开基类 CustomComponent 的通用属性 size（.size() 是通用样式方法），命名 dotSize
+  @Prop dotSize: number = 10;
   @State private pulse: boolean = false;
 
   private toneColor(): string {
@@ -38,8 +39,8 @@ export struct StatusDot {
 
   build() {
     Circle()
-      .width(this.size)
-      .height(this.size)
+      .width(this.dotSize)
+      .height(this.dotSize)
       .fill(this.toneColor())
       .opacity(this.tone === StatusTone.Running && !this.pulse ? 0.55 : 1)
       .onAppear(() => {
