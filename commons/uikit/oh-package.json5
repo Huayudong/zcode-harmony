@@ -1,0 +1,11 @@
+{
+  "name": "uikit",
+  "version": "0.1.0",
+  "description": "ZCode Harmony 组件库：光感按钮、状态灯、主题 token",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "utils": "file:../utils"
+  }
+}

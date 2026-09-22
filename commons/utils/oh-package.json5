@@ -1,0 +1,9 @@
+{
+  "name": "utils",
+  "version": "0.1.0",
+  "description": "ZCode Harmony 通用工具：断点、时间格式化",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

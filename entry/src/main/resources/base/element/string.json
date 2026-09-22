@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "ZCode Harmony 主入口模块"
+    },
+    {
+      "name": "ability_desc",
+      "value": "ZCode Harmony"
+    },
+    {
+      "name": "app_name",
+      "value": "ZCode Harmony"
+    }
+  ]
+}
