@@ -1,0 +1,13 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "ZCode Harmony 主入口",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "uikit": "file:../commons/uikit",
+    "utils": "file:../commons/utils",
+    "protocol": "file:../commons/protocol"
+  }
+}

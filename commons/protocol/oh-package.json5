@@ -1,0 +1,9 @@
+{
+  "name": "protocol",
+  "version": "0.1.0",
+  "description": "@zcode/rpc 移植层（L0 基础设施 / L1 序列化 / L2 传输分帧）",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

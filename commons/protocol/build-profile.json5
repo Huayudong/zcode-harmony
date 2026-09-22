@@ -1,0 +1,12 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {},
+    "arkOptions": {}
+  },
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}
