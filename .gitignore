@@ -6,6 +6,8 @@
 **/build
 **/oh_modules
 **/.cxx
+**/.preview
+**/BuildProfile.ets
 /.hvigor
 **/.hvigor
 /.appanalyzer

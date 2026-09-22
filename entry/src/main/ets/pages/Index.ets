@@ -25,7 +25,7 @@ struct Index {
         .margin({ bottom: 32 })
 
       Row({ space: 8 }) {
-        StatusDot({ tone: this.running ? StatusTone.Running : StatusTone.Offline, size: 10 })
+        StatusDot({ tone: this.running ? StatusTone.Running : StatusTone.Offline, dotSize: 10 })
         Text(this.running ? '正在重构模块…' : '空闲')
           .fontSize(14)
           .fontColor(ZcodeColors.textSecondary())

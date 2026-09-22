@@ -1,1 +1,1 @@
-export { Breakpoint, BreakpointUtil } from './src/main/ets/breakpoint/Breakpoint';
+export { Breakpoint, BreakpointLevel } from './src/main/ets/breakpoint/Breakpoint';
