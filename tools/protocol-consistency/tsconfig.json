@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      // 原包（F: 盘为残缺安装，无 pnpm workspace 链接）在测试侧的解析兜底：
+      // 映射到 vendor 进 node_modules 的源码副本（仅测试用，不入设备构建）
+      "@zcode/model-option-map": ["./node_modules/@zcode/model-option-map/src/index.ts"]
+    }
+  },
+  "include": ["*.mjs"]
+}

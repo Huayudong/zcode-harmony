@@ -91,3 +91,30 @@ export class DisposableStore implements IDisposable {
     this.items.clear();
   }
 }
+
+
+// ── 取消令牌（@zcode/rpc foundation.ts 的最小移植子集）──
+
+export interface CancellationToken {
+  readonly isCancellationRequested: boolean;
+  readonly onCancellationRequested: Event<void>;
+}
+
+const cancellationNone: CancellationToken = {
+  isCancellationRequested: false,
+  onCancellationRequested: (): IDisposable => toDisposable(() => {}),
+};
+
+export const CancellationToken = {
+  None: cancellationNone,
+};
+
+/** 等待事件首次触发（ChannelClient whenInitialized 用）。 */
+export function eventToPromise<T>(event: Event<T>): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const d = event((e: T) => {
+      d.dispose();
+      resolve(e);
+    });
+  });
+}
