@@ -8,6 +8,7 @@
   "dependencies": {
     "uikit": "file:../commons/uikit",
     "utils": "file:../commons/utils",
+    "connection": "file:../commons/connection",
     "protocol": "file:../commons/protocol"
   }
 }

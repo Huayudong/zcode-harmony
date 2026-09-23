@@ -48,6 +48,10 @@
       "srcPath": "./commons/utils"
     },
     {
+      "name": "connection",
+      "srcPath": "./commons/connection"
+    },
+    {
       "name": "protocol",
       "srcPath": "./commons/protocol"
     }

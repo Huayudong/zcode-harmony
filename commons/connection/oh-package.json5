@@ -1,0 +1,9 @@
+{
+  "name": "connection",
+  "version": "0.1.0",
+  "description": "ZCode Harmony 连接层：配对深链解析、证书固定、固定 CA 的 HTTP/WSS 探针、连接档案与 token 存储",
+  "main": "Index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}
