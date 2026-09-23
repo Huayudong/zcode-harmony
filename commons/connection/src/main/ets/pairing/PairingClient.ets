@@ -15,6 +15,9 @@ export interface ClaimResponse {
 export interface ServerInfoCheck {
   serverId: string;
   certFingerprint: string;
+  /** 首个工作区（v4 订阅的 workspace target；server-info 未下发时为空串）。 */
+  workspacePath: string;
+  workspaceIdentity: string;
 }
 
 interface ClaimRequestBody {
@@ -33,9 +36,15 @@ interface ServerInfoCapabilities {
   certFingerprint?: string;
 }
 
+interface ServerInfoWorkspace {
+  path?: string;
+  workspaceIdentity?: string;
+}
+
 interface ServerInfoBody {
   serverId?: string;
   capabilities?: ServerInfoCapabilities;
+  workspaces?: ServerInfoWorkspace[];
 }
 
 /**
@@ -78,5 +87,14 @@ export async function fetchServerInfo(client: PinnedHttpClient, target: PinnedHt
     && servedFingerprint !== expectedFingerprint) {
     throw new PinnedHttpError('HandshakeFailed', 'server-info 证书指纹与配对时不一致，可能存在风险');
   }
-  return { serverId: serverId, certFingerprint: servedFingerprint };
+  return {
+    serverId: serverId,
+    certFingerprint: servedFingerprint,
+    workspacePath: body.workspaces !== undefined && body.workspaces.length > 0
+      ? (body.workspaces[0].path ?? '')
+      : '',
+    workspaceIdentity: body.workspaces !== undefined && body.workspaces.length > 0
+      ? (body.workspaces[0].workspaceIdentity ?? '')
+      : '',
+  };
 }

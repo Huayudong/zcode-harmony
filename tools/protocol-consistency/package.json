@@ -4,7 +4,7 @@
   "type": "module",
   "description": "移植层（commons/protocol）与 @zcode/rpc 原包的一致性门禁：同向量逐字节比对",
   "scripts": {
-    "test": "node --import tsx --test ./rpc-consistency.test.mjs"
+    "test": "node --import tsx --test --test-force-exit ./rpc-consistency.test.mjs ./session-consistency.test.mjs"
   },
   "devDependencies": {
     "tsx": "^4.19.4"

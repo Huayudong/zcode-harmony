@@ -1,3 +1,4 @@
+/// <reference path="./globals.d.ts" />
 /**
  * Layer 0 基础设施：VSBuffer（@zcode/rpc buffer.ts 的鸿蒙移植）。
  * 移植原则：逐行为对齐原实现，编码字节必须与原包一致（一致性测试门禁）。

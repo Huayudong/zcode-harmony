@@ -8,8 +8,11 @@ import {
   caFilePathIn,
   ensureCaFileWritten,
   fetchServerInfo,
-  probeWsHandshake
+  probeWsHandshake,
+  pullSessionsSnapshot,
+  SessionsPullError
 } from 'connection';
+import type { WorkspaceTarget } from 'protocol';
 import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
 
 type CheckStatus = 'pending' | 'running' | 'pass' | 'fail';
@@ -26,7 +29,7 @@ const STEP_INDEX_SESSION: number = 2;
 
 /**
  * 连接自检页（ONB-5）：HTTPS+token → WSS 握手 → 会话列表拉取，逐项点亮。
- * ①②为真实探测；③在本批为占位（会话协议层 L3/L4 下一批接入）。
+ * ①②为真实探测；③为真实 v4 会话订阅（批次6：L3/L4 接入，拉取 sessions-index snapshot）。
  */
 @Entry
 @Component
@@ -34,7 +37,7 @@ struct PairingSelfCheck {
   @State steps: CheckStep[] = [
     { title: 'HTTPS 连通性与凭证', status: 'pending', message: '等待开始' } as CheckStep,
     { title: '安全通道（WSS 握手）', status: 'pending', message: '等待开始' } as CheckStep,
-    { title: '会话列表拉取', status: 'pending', message: '等待会话协议层接入' } as CheckStep,
+    { title: '会话列表拉取', status: 'pending', message: '等待开始' } as CheckStep,
   ];
   @State serverName: string = '';
   @State busy: boolean = false;
@@ -94,10 +97,14 @@ struct PairingSelfCheck {
       caPem: session.caPem,
     };
 
-    // ① HTTPS + 设备 token。
+    // ① HTTPS + 设备 token（同时取 v4 订阅所需的 workspace target）。
+    let workspacePath: string = '';
+    let workspaceIdentity: string = '';
     this.setStep(STEP_INDEX_HTTPS, 'running', '连接中…');
     try {
       const info = await fetchServerInfo(client, target, session.token, session.certFingerprint);
+      workspacePath = info.workspacePath;
+      workspaceIdentity = info.workspaceIdentity;
       this.setStep(STEP_INDEX_HTTPS, 'pass', `已连接（serverId ${info.serverId.substring(0, 8)}…）`);
     } catch (error) {
       const pinned = error instanceof PinnedHttpError ? error : new PinnedHttpError('ConnectFailed', String(error));
@@ -106,19 +113,40 @@ struct PairingSelfCheck {
 
     // ② WSS 握手（证书文件已由 ① 的客户端写入沙箱；此处幂等确保存在）。
     this.setStep(STEP_INDEX_WSS, 'running', '握手中…');
+    let wssOk: boolean = false;
     try {
       if (session.caPem.length > 0) {
         await ensureCaFileWritten(getContext(this).filesDir, session.caPem);
       }
       await probeWsHandshake(target, '/ws', caFilePathIn(getContext(this).filesDir));
+      wssOk = true;
       this.setStep(STEP_INDEX_WSS, 'pass', '安全通道就绪');
     } catch (error) {
       const pinned = error instanceof PinnedHttpError ? error : new PinnedHttpError('ConnectFailed', String(error));
       this.setStep(STEP_INDEX_WSS, 'fail', this.adviceFor(pinned));
     }
 
-    // ③ 会话拉取：占位（L3/L4 下一批接入后替换为真实拉取）。
-    this.setStep(STEP_INDEX_SESSION, 'pending', '等待会话协议层接入（下一批）');
+    // ③ 会话拉取：真实 v4 订阅（握手 hello 版本锁 → subscribeSessionsIndex → 首个 snapshot）。
+    if (!wssOk || workspacePath.length === 0) {
+      this.setStep(STEP_INDEX_SESSION, 'fail',
+        wssOk ? 'server-info 未下发工作区，无法订阅会话列表' : 'WSS 未就绪，跳过会话拉取');
+      this.busy = false;
+      return;
+    }
+    this.setStep(STEP_INDEX_SESSION, 'running', '订阅会话列表…');
+    try {
+      const workspace: WorkspaceTarget = { workspacePath: workspacePath };
+      if (workspaceIdentity.length > 0) {
+        workspace.workspaceIdentity = workspaceIdentity;
+      }
+      const result = await pullSessionsSnapshot(target, session.token,
+        caFilePathIn(getContext(this).filesDir), workspace);
+      this.setStep(STEP_INDEX_SESSION, 'pass', `会话列表就绪（${result.count} 个会话）`);
+    } catch (error) {
+      const pull = error instanceof SessionsPullError ? error : null;
+      this.setStep(STEP_INDEX_SESSION, 'fail',
+        pull !== null ? `会话拉取失败：${pull.detail}` : `会话拉取失败：${String(error)}`);
+    }
     this.busy = false;
   }
 

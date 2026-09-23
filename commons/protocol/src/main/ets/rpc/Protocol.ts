@@ -17,6 +17,15 @@ export interface IMessagePassingProtocol {
   drain?(): Promise<void>;
 }
 
+/**
+ * 拥塞背压面：PersistentProtocol 实现，事件级按需消费（帧级 → 事件级唯一新增接口）。
+ */
+export interface ConnectionFlowControl {
+  readonly unacknowledgedBytes: number;
+  readonly onSaturated: Event<void>;
+  readonly onDrained: Event<void>;
+}
+
 export interface ISocket extends IDisposable {
   onData: Event<VSBuffer>;
   onClose: Event<void>;
