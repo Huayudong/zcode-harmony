@@ -7,6 +7,8 @@
 **/oh_modules
 **/.cxx
 **/.preview
+**/.preview2
+entry/.preview2/
 **/BuildProfile.ets
 /.hvigor
 **/.hvigor
