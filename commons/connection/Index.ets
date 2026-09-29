@@ -29,5 +29,6 @@ export {
   type ResolveAnswer,
   type AttachmentItem,
   type AttachmentUpdate,
-  type WorkspaceFileView
+  type WorkspaceFileView,
+  type NotificationLevel
 } from './src/main/ets/workbench/WorkbenchController';

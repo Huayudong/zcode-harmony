@@ -4,6 +4,7 @@
     "pages/pairing/PairingWelcome",
     "pages/pairing/PairingCodeInput",
     "pages/pairing/PairingSelfCheck",
+    "pages/pairing/NetworkGuide",
     "pages/workbench/SessionList",
     "pages/workbench/SessionDetail"
   ]
