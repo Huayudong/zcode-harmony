@@ -23,6 +23,7 @@ import type {
   PendingInteractionOptionView,
 } from 'protocol';
 import { ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import { mdBlockKey, parseMarkdownBlocks, type MdBlock, type MdSpan } from 'utils';
 
 /** 会话列表 → 会话页的路由参数（与 SessionList 侧同构）。 */
 interface SessionRouteParams {
@@ -32,13 +33,6 @@ interface SessionRouteParams {
 
 /** 内置快捷指令（PRD INP-5 的 4 个内置 chips；用户自定义模板 P1）。 */
 const QUICK_CHIPS: string[] = ['继续', '跑测试', '解释这段 diff', '换个思路'];
-
-/** assistantText 正文切分后的段（OUT-2 代码块渲染）。 */
-interface TextSegment {
-  isCode: boolean;
-  lang: string;
-  content: string;
-}
 
 /**
  * 会话页（三 Tab 骨架 + 批次10 A7 后半）：对话 Tab = 渲染管线 + 批准卡片 + 输入舱；
@@ -313,45 +307,6 @@ struct SessionDetail {
   }
 
   // ── OUT-2 代码块切分与复制 ──
-
-  private splitCodeBlocks(text: string): TextSegment[] {
-    const segments: TextSegment[] = [];
-    let rest = text;
-    while (true) {
-      const start = rest.indexOf('```');
-      if (start < 0) {
-        if (rest.length > 0) {
-          const plain: TextSegment = { isCode: false, lang: '', content: rest };
-          segments.push(plain);
-        }
-        break;
-      }
-      if (start > 0) {
-        const plain: TextSegment = { isCode: false, lang: '', content: rest.substring(0, start) };
-        segments.push(plain);
-      }
-      const afterFence = rest.substring(start + 3);
-      const nl = afterFence.indexOf('\n');
-      if (nl < 0) {
-        const open: TextSegment = { isCode: true, lang: afterFence.trim(), content: '' };
-        segments.push(open);
-        break;
-      }
-      const lang = afterFence.substring(0, nl).trim();
-      const bodyStart = nl + 1;
-      const end = afterFence.indexOf('```', bodyStart);
-      if (end < 0) {
-        // 流式中的未闭合代码块：按暂态代码渲染，避免闪烁
-        const open: TextSegment = { isCode: true, lang: lang, content: afterFence.substring(bodyStart) };
-        segments.push(open);
-        break;
-      }
-      const closed: TextSegment = { isCode: true, lang: lang, content: afterFence.substring(bodyStart, end) };
-      segments.push(closed);
-      rest = afterFence.substring(end + 3);
-    }
-    return segments;
-  }
 
   private codeKey(rowId: number, index: number): string {
     return `${rowId}-${index}`;
@@ -899,12 +854,66 @@ struct SessionDetail {
     .margin({ top: 6 })
   }
 
-  /** OUT-2：代码块（语言徽标 + 复制 + 超 20 行折叠）。 */
+  /** 行内片段渲染（粗体/行内代码）。 */
   @Builder
-  CodeBlock(seg: TextSegment, key: string) {
+  MdSpans(spans: MdSpan[], size: number, color: string, forceBold: boolean) {
+    Text() {
+      ForEach(spans, (span: MdSpan) => {
+        Span(span.text)
+          .fontWeight(span.bold || forceBold ? FontWeight.Bold : FontWeight.Normal)
+          .fontFamily(span.code ? 'monospace' : '')
+      }, (span: MdSpan) => `${span.text}-${span.bold}-${span.code}`)
+    }
+    .fontSize(size)
+    .fontColor(color)
+  }
+
+  /** OUT-1：markdown 块级渲染（段落/标题/列表/引用/代码）。 */
+  @Builder
+  MdBlockView(block: MdBlock, key: string, rowState: string) {
+    if (block.kind === 'code') {
+      this.CodeBlock(block.lang, block.spans[0][0].text, block.closed, key)
+    } else if (block.kind === 'heading') {
+      this.MdSpans(block.spans[0], block.level <= 1 ? 19 : (block.level === 2 ? 17 : 15), ZcodeColors.textPrimary(), true)
+    } else if (block.kind === 'list') {
+      Column({ space: 3 }) {
+        ForEach(block.spans, (line: MdSpan[], lineIndex: number) => {
+          Row({ space: 6 }) {
+            Text(block.ordered ? `${lineIndex + 1}.` : '•')
+              .fontSize(14)
+              .fontColor(ZcodeColors.textTertiary())
+            this.MdSpans(line, 15, ZcodeColors.textPrimary(), false)
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+        }, (line: MdSpan[], lineIndex: number) => `${lineIndex}-${line.length}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    } else if (block.kind === 'quote') {
+      Row({ space: 8 }) {
+        Divider()
+          .color(ZcodeColors.BRAND)
+          .strokeWidth(2)
+          .vertical(true)
+          .height('100%')
+        this.MdSpans(block.spans[0], 14, ZcodeColors.textSecondary(), false)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+      .padding({ left: 8 })
+    } else {
+      // 段落（失败态降灰）
+      this.MdSpans(block.spans[0], 15, rowState === 'failed' ? ZcodeColors.textSecondary() : ZcodeColors.textPrimary(), false)
+    }
+  }
+
+  /** OUT-2：代码块（语言徽标 + 复制 + 超 20 行折叠；未闭合按暂态标注）。 */
+  @Builder
+  CodeBlock(lang: string, content: string, closed: boolean, key: string) {
     Column({ space: 6 }) {
       Row({ space: 8 }) {
-        Text(seg.lang.length > 0 ? seg.lang : 'code')
+        Text(lang.length > 0 ? (closed ? lang : `${lang} · 输出中`) : (closed ? 'code' : 'code · 输出中'))
           .fontSize(10)
           .fontColor(ZcodeColors.textSecondary())
           .backgroundColor(ZcodeColors.background())
@@ -915,10 +924,10 @@ struct SessionDetail {
           .fontSize(11)
           .fontColor(ZcodeColors.BRAND_LIGHT)
           .onClick(() => {
-            void this.copyText(seg.content);
+            void this.copyText(content);
           })
-        if (seg.content.split('\n').length > 20) {
-          Text(this.isCodeExpanded(key) ? '收起' : `展开全部 ${seg.content.split('\n').length} 行`)
+        if (content.split('\n').length > 20) {
+          Text(this.isCodeExpanded(key) ? '收起' : `展开全部 ${content.split('\n').length} 行`)
             .fontSize(11)
             .fontColor(ZcodeColors.BRAND_LIGHT)
             .onClick(() => {
@@ -930,8 +939,8 @@ struct SessionDetail {
       .alignItems(VerticalAlign.Center)
 
       Scroll() {
-        Text(this.isCodeExpanded(key) ? seg.content
-          : seg.content.split('\n').slice(0, 20).join('\n'))
+        Text(this.isCodeExpanded(key) ? content
+          : content.split('\n').slice(0, 20).join('\n'))
           .fontSize(12)
           .fontFamily('monospace')
           .fontColor(ZcodeColors.textPrimary())
@@ -1008,16 +1017,11 @@ struct SessionDetail {
         this.actionsRowId = this.actionsRowId === row.rowId ? -1 : row.rowId;
       }))
     } else if (row.kind === 'assistantText') {
-      Column({ space: 2 }) {
-        ForEach(this.splitCodeBlocks(row.text), (seg: TextSegment, idx: number) => {
-          if (seg.isCode) {
-            this.CodeBlock(seg, this.codeKey(row.rowId, idx))
-          } else if (seg.content.trim().length > 0) {
-            Text(seg.content)
-              .fontSize(15)
-              .fontColor(row.state === 'failed' ? ZcodeColors.textSecondary() : ZcodeColors.textPrimary())
-          }
-        }, (seg: TextSegment, idx: number) => `${idx}-${seg.isCode}-${seg.content.length}`)
+      Column({ space: 4 }) {
+        // OUT-1 增量渲染：块级解析 + 稳定 key（前缀块 key 不变 → 组件复用不重建）
+        ForEach(parseMarkdownBlocks(row.text), (block: MdBlock, idx: number) => {
+          this.MdBlockView(block, this.codeKey(row.rowId, idx), row.state)
+        }, (block: MdBlock, idx: number) => `${this.codeKey(row.rowId, idx)}:${mdBlockKey(block)}`)
         if (row.state === 'failed') {
           // OUT-7：失败回复卡片化 + 重发动作（原文重发，服务端按幂等/上下文处理）
           Row({ space: 10 }) {
