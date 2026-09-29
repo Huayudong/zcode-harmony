@@ -14,6 +14,7 @@ import {
   helloMessageSchema,
   sessionsIndexTopicFrameSchema,
   conversationTopicFrameSchema,
+  v4ConversationFileChangesResultSchema,
   type HelloMessage,
   type SessionsIndexTopicFrame,
   type ConversationTopicFrame,
@@ -243,6 +244,21 @@ export class AgentV4Client {
       envelope,
     });
     return commandAckSchema.parse(raw);
+  }
+
+  /** 只读查询：某轮的文件变更与 diff hunks（结果过 schema 校验）。 */
+  async conversationFileChanges(params: {
+    sessionId: string;
+    target: { rowId: number; entityId: string };
+    baseRevision: number;
+    baseLogEpoch: string;
+  }): Promise<unknown> {
+    const raw = await this.stub.conversationFileChangesV4({
+      workspacePath: this.target.workspacePath,
+      ...(this.target.workspaceIdentity ? { workspaceIdentity: this.target.workspaceIdentity } : {}),
+      ...params,
+    });
+    return v4ConversationFileChangesResultSchema.parse(raw);
   }
 
   /** 有序关闭：取消所有事件上游并释放通道客户端。 */

@@ -371,4 +371,35 @@ export class ConnectionEngine {
     this.activeConversations.delete(sessionId);
     this.watermarks.delete(`conversation/${sessionId}`);
   }
+
+  // ── 只读查询面 ──
+
+  /** 某轮的文件变更与 diff hunks（需在线；查询不走命令队列，失败直接抛）。 */
+  async queryFileChanges(sessionId: string, rowId: number, entityId: string,
+    baseRevision: number, baseLogEpoch: string): Promise<object> {
+    const client = this.client;
+    if (client === null) {
+      throw new Error('未连接');
+    }
+    const target: FileChangesRowTarget = { rowId: rowId, entityId: entityId };
+    const params: FileChangesQueryParams = {
+      sessionId: sessionId,
+      target: target,
+      baseRevision: baseRevision,
+      baseLogEpoch: baseLogEpoch,
+    };
+    return await client.conversationFileChanges(params) as object;
+  }
+}
+
+interface FileChangesRowTarget {
+  rowId: number;
+  entityId: string;
+}
+
+interface FileChangesQueryParams {
+  sessionId: string;
+  target: FileChangesRowTarget;
+  baseRevision: number;
+  baseLogEpoch: string;
 }
