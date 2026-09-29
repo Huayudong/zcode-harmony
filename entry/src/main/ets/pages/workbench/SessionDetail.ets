@@ -4,6 +4,8 @@ import pasteboard from '@ohos.pasteboard';
 import fs from '@ohos.file.fs';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { picker } from '@kit.CoreFileKit';
+import { cameraPicker, camera } from '@kit.CameraKit';
+import { parseBlocks } from './MdParserTask';
 import {
   WorkbenchController,
   type AttachmentItem,
@@ -79,6 +81,9 @@ struct SessionDetail {
   @State timeline: ConversationRowView[] = [];
   private atSearchTimer: number = -1;
   private listScroller: Scroller = new Scroller();
+  private blocksByRow: Map<number, MdBlock[]> = new Map();
+  private parseGeneration: number = 0;
+  @State blocksTick: number = 0;
   private controller: WorkbenchController | null = null;
   private sessionId: string = '';
   private disposables: IDisposable[] = [];
@@ -128,6 +133,7 @@ struct SessionDetail {
       }
       this.refreshTurns();
       this.refreshTimeline();
+      this.precomputeBlocks(update.rows);
       if (this.atBottom && this.activeTab === 0) {
         setTimeout((): void => {
           this.listScroller.scrollEdge(Edge.Bottom);
@@ -144,7 +150,38 @@ struct SessionDetail {
     }
     this.refreshTurns();
     this.refreshTimeline();
+    this.precomputeBlocks(this.rows);
     await this.loadDraft();
+  }
+
+  /** OUT-1 TaskPool：会话行分块预计算（设备投递线程池，预览器降级同步）；代际守卫丢弃过期填充。 */
+  private precomputeBlocks(rows: ConversationRowView[]): void {
+    const generation = ++this.parseGeneration;
+    void this.parseRowsAsync(rows, generation);
+  }
+
+  private async parseRowsAsync(rows: ConversationRowView[], generation: number): Promise<void> {
+    for (const row of rows) {
+      if (generation !== this.parseGeneration) {
+        return;
+      }
+      try {
+        const blocks = await parseBlocks(row.text);
+        if (generation !== this.parseGeneration) {
+          return;
+        }
+        this.blocksByRow.set(row.rowId, blocks);
+      } catch (error) {
+        this.blocksByRow.delete(row.rowId);
+      }
+    }
+    this.blocksTick += 1;
+  }
+
+  /** 渲染取块：预计算就绪用缓存，否则同步兜底（首帧）。 */
+  private blocksFor(row: ConversationRowView): MdBlock[] {
+    const cached = this.blocksByRow.get(row.rowId);
+    return cached !== undefined ? cached : parseMarkdownBlocks(row.text);
   }
 
   /** OUT-6 简版时间线：当前轮（最后一个 turnHeader 之后）的执行步骤。 */
@@ -426,6 +463,31 @@ struct SessionDetail {
       }
     } catch (error) {
       this.sendHint = `选图失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.attachBusy = false;
+  }
+
+  /** INP-3 拍照直拍：CameraPicker 系统安全组件（无需自管相机权限），拍后即走附件上传链。 */
+  private async pickCamera(): Promise<void> {
+    if (this.attachBusy || this.sessionId.length === 0) {
+      return;
+    }
+    const controller = this.controller;
+    if (controller === null) {
+      return;
+    }
+    this.attachBusy = true;
+    try {
+      const context = getContext(this);
+      const mediaTypes: Array<cameraPicker.PickerMediaType> = [cameraPicker.PickerMediaType.PHOTO];
+      const profile: cameraPicker.PickerProfile = { cameraPosition: camera.CameraPosition.CAMERA_POSITION_BACK };
+      const result: cameraPicker.PickerResult = await cameraPicker.pick(context, mediaTypes, profile);
+      if (result.resultCode === 0 && result.resultUri.length > 0) {
+        const picked = readPickedFile(result.resultUri);
+        await controller.attachFile(this.sessionId, picked.fileName, picked.mime, picked.bytes, result.resultUri, true);
+      }
+    } catch (error) {
+      this.sendHint = `拍照失败：${error instanceof Error ? error.message : String(error)}`;
     }
     this.attachBusy = false;
   }
@@ -1019,9 +1081,9 @@ struct SessionDetail {
     } else if (row.kind === 'assistantText') {
       Column({ space: 4 }) {
         // OUT-1 增量渲染：块级解析 + 稳定 key（前缀块 key 不变 → 组件复用不重建）
-        ForEach(parseMarkdownBlocks(row.text), (block: MdBlock, idx: number) => {
+        ForEach(this.blocksFor(row), (block: MdBlock, idx: number) => {
           this.MdBlockView(block, this.codeKey(row.rowId, idx), row.state)
-        }, (block: MdBlock, idx: number) => `${this.codeKey(row.rowId, idx)}:${mdBlockKey(block)}`)
+        }, (block: MdBlock, idx: number) => `${this.codeKey(row.rowId, idx)}:${mdBlockKey(block)}:${this.blocksTick}`)
         if (row.state === 'failed') {
           // OUT-7：失败回复卡片化 + 重发动作（原文重发，服务端按幂等/上下文处理）
           Row({ space: 10 }) {
@@ -1552,6 +1614,12 @@ struct SessionDetail {
               })
 
             Row({ space: 6 }) {
+              Text('📸')
+                .fontSize(14)
+                .opacity(this.attachBusy ? 0.4 : 1)
+                .onClick(() => {
+                  void this.pickCamera();
+                })
               Text('📷')
                 .fontSize(14)
                 .opacity(this.attachBusy ? 0.4 : 1)
@@ -1568,6 +1636,7 @@ struct SessionDetail {
                 .fontSize(10)
                 .fontColor(ZcodeColors.textTertiary())
               this.ModeChip('Agent', 'build')
+              this.ModeChip('问答', 'ask')
               this.ModeChip('Plan', 'plan')
               Blank()
             }

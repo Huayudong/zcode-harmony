@@ -674,13 +674,15 @@ export class WorkbenchController {
 
   // ── 命令面（全部走 engine 幂等队列）──
 
-  /** 发送文本；mode 为按次协作模式（'build'|'plan'，空串 = 跟随服务端会话当前模式）；
-   *  attachments 传当前会话的附件集，只有 ready 状态的会随信封引用发送，发送成功后整组清除。 */
+  /** 发送文本；mode 为按次协作模式（'build'|'plan'|'ask'，空串 = 跟随服务端会话当前模式）；
+   *  attachments 传当前会话的附件集，只有 ready 状态的会随信封引用发送，发送成功后整组清除。
+   *  'ask'（问答档）按计划 §9-Q3 推荐映射为 plan 执行语义（App 端本地概念，待产品复核）。 */
   async sendText(sessionId: string, text: string, mode: string, attachments: AttachmentItem[]): Promise<void> {
     const engine = this.engine;
     if (engine === null) {
       throw new Error('未连接');
     }
+    const wireMode = mode === 'ask' ? 'plan' : mode;
     const ready: SendAttachmentRef[] = [];
     for (const item of attachments) {
       if (item.state === 'ready' && item.ref.length > 0) {
@@ -688,10 +690,10 @@ export class WorkbenchController {
       }
     }
     let payload: SendTextPayload;
-    if (mode.length > 0 && ready.length > 0) {
-      payload = { text: text, mode: mode, attachments: ready };
-    } else if (mode.length > 0) {
-      payload = { text: text, mode: mode };
+    if (wireMode.length > 0 && ready.length > 0) {
+      payload = { text: text, mode: wireMode, attachments: ready };
+    } else if (wireMode.length > 0) {
+      payload = { text: text, mode: wireMode };
     } else if (ready.length > 0) {
       payload = { text: text, attachments: ready };
     } else {
