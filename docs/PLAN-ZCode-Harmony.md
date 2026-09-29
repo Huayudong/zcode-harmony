@@ -589,6 +589,33 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 19/19 + 构建 | 端到端/版本锁覆盖新桩接线；spec：鸿蒙仓 `docs/specs/a6-attachments.md` |
 | 范围外 | — | 拍照直拍（CameraKit 待真机）、图片缩略图、断点续传/并发上传、mention 目录归一化完整规则、@ 面板会话/模式分组 |
 
+### Batch 14（2026-09-29）：A9 设置 + 列表增强（App，V1 收尾批）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| A9 设置页 | ✅ | pages/settings/Settings：连接诊断卡（状态机档位+详情+水位/待发命令只读视图+重连）、Server 档案管理（活跃标记/设为活跃=saveProfile+controller.restart() 重建连接链/重新配对入口）、通知分级三档（接 Batch13 持久化）、缓存清理（SessionCache 双表+草稿，不动档案与 Asset 凭证）；主题深色默认（浅色 M2）、字体设置待主题 token 体系（M2） |
+| CONN-2 下拉刷新 | ✅ | Refresh 组件 → controller.retry()（重连+带水位重订阅即刷新）；状态事件即时收起 + 5s 超时双保险 |
+| 列表增强 | ✅ V1 子集 | 本地搜索（标题+末条预览）、今天/近7天/更早分组、置顶（preferences 本地偏好，全局最前带📌）、重命名（renameSession 幂等命令 → sessions-index delta 回流，浮层确认）；**归档无 v4 协议命令**——明示「归档请用桌面端」（协议演进项） |
+| 门禁 | ✅ 19/19 + 构建 | spec：鸿蒙仓 `docs/specs/a9-settings.md` |
+
+### Batch 13（2026-09-29）：配对收口 + 前台通知（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| ONB-2 扫码 | ✅ | Scan Kit 系统扫码页（scanBarcode.startScanForResult，QR_CODE，系统页自管相机权限）；isPairLink 校验 → 带 link 进导入页预填（复用 ONB-4 + 指纹校验）；取消静默 |
+| CONN-4 指引页 | ✅ | NetworkGuide 图文页四节手风琴（局域网直连/Tailscale/FRP 反代/FAQ），P0 只指引不集成；欢迎页底部入口 |
+| A8 前台通知 | ✅ 简化版 | Controller 通知策略唯一所有者：NTY-1 等待确认（新 interactionId 去重；approval-only 只推 permission）/NTY-2 完成（all 档，阶段迁移终态，首快照不补发）/NTY-4 三档分级 preferences 持久化 |
+| 门禁 | ✅ 19/19 + 构建 | spec：鸿蒙仓 `docs/specs/a8-pairing-notify.md`；Push 全链路/直达卡片/夜间静默属 M2 |
+
+### Batch 12（2026-09-29）：A7 收口——滚动体验 / 时间线简版 / 失败重发（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| OUT-1 滚动部分 | ✅ | List 挂 Scroller：底部跟随自动滚底；上滑离底（onScrollIndex 判定）暂停跟随 + 「↓ 回到底部」品牌浮标 |
+| OUT-6 简版 | ✅ | 对话顶部可折叠「任务步骤」条 = 当前轮（最后 turnHeader 之后）toolCall/subagent 投影；序号+状态灯珠步骤列表；纯 rows 派生零请求 |
+| OUT-7 | ✅ 部分 | failed 回复卡片「重发上一条」（最近 userInput 原文重发，新 commandId 幂等队列） |
+| 门禁 | ✅ 19/19 + 构建 | spec：鸿蒙仓 `docs/specs/a7-closing.md`；OUT-1 增量 markdown AST/16ms 合帧/TaskPool 待真机性能批 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
