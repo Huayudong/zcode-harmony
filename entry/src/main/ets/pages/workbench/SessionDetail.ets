@@ -205,20 +205,36 @@ struct SessionDetail {
     this.timeline = steps;
   }
 
-  /** OUT-7：失败回复的重发动作 = 把最近一条用户输入原文重发（新 commandId，服务端幂等）。 */
-  private resendLastInput(): void {
+  private lastUserInputText(): string {
     let lastUserInput = '';
     for (const row of this.rows) {
       if (row.kind === 'userInput' && row.text.length > 0) {
         lastUserInput = row.text;
       }
     }
+    return lastUserInput;
+  }
+
+  /** OUT-7：失败回复的重发动作 = 把最近一条用户输入原文重发（新 commandId，服务端幂等）。 */
+  private resendLastInput(): void {
+    const lastUserInput = this.lastUserInputText();
     if (lastUserInput.length === 0) {
       this.sendHint = '没有可重发的输入';
       return;
     }
     this.inputText = lastUserInput;
     void this.send();
+  }
+
+  /** OUT-7「修改后重发」：回填输入框，用户编辑后再发送。 */
+  private editLastInput(): void {
+    const lastUserInput = this.lastUserInputText();
+    if (lastUserInput.length === 0) {
+      this.sendHint = '没有可修改的输入';
+      return;
+    }
+    this.inputText = lastUserInput;
+    this.scheduleDraftSave();
   }
 
   /** 有文件变更聚合的轮次（turnHeader.fileCount>0），保持选中、默认最新。 */
@@ -1098,6 +1114,12 @@ struct SessionDetail {
               .fontColor(ZcodeColors.BRAND_LIGHT)
               .onClick(() => {
                 this.resendLastInput();
+              })
+            Text('修改后重发')
+              .fontSize(12)
+              .fontColor(ZcodeColors.BRAND_LIGHT)
+              .onClick(() => {
+                this.editLastInput();
               })
           }
           .padding({ left: 10, right: 10, top: 6, bottom: 6 })

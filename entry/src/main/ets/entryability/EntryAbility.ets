@@ -10,8 +10,15 @@ const DOMAIN: number = 0x0000;
 const TAG: string = 'EntryAbility';
 const PAIRING_PAGE: string = 'pages/pairing/PairingCodeInput';
 
+/** 通知点击直达会话页的路由参数（与 SessionList 侧同构）。 */
+interface SessionRouteParams {
+  sessionId: string;
+  title: string;
+}
+
 export default class EntryAbility extends UIAbility {
   private pendingPairLink: string = '';
+  private pendingSessionId: string = '';
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     PerfMarks.mark('cold_start');
@@ -19,6 +26,18 @@ export default class EntryAbility extends UIAbility {
     // 冷启动深链：onNewWant 不会再触发，先暂存、页面栈就绪后路由。
     if (isPairLink(want.uri ?? '')) {
       this.pendingPairLink = want.uri ?? '';
+    }
+    this.extractSessionId(want);
+  }
+
+  /** 通知点击直达（A8）：want.parameters.sessionId → 会话页路由参数。 */
+  private extractSessionId(want: Want): void {
+    const params = want.parameters;
+    if (params !== undefined) {
+      const sessionId = params.sessionId;
+      if (typeof sessionId === 'string' && sessionId.length > 0) {
+        this.pendingSessionId = sessionId;
+      }
     }
   }
 
@@ -39,6 +58,14 @@ export default class EntryAbility extends UIAbility {
         this.pendingPairLink = '';
         this.openPairingPage(link);
       }
+      if (this.pendingSessionId.length > 0) {
+        const sessionId = this.pendingSessionId;
+        this.pendingSessionId = '';
+        const options: router.RouterOptions = { url: 'pages/workbench/SessionDetail', params: { sessionId: sessionId, title: '' } as SessionRouteParams };
+        router.pushUrl(options).catch((error: BusinessError) => {
+          hilog.error(DOMAIN, TAG, 'openSessionPage failed: %{public}s', String(error));
+        });
+      }
     });
   }
 
@@ -56,6 +83,15 @@ export default class EntryAbility extends UIAbility {
     const uri = want.uri ?? '';
     if (isPairLink(uri)) {
       this.openPairingPage(uri);
+    }
+    this.extractSessionId(want);
+    if (this.pendingSessionId.length > 0) {
+      const sessionId = this.pendingSessionId;
+      this.pendingSessionId = '';
+      const options: router.RouterOptions = { url: 'pages/workbench/SessionDetail', params: { sessionId: sessionId, title: '' } as SessionRouteParams };
+      router.pushUrl(options).catch((error: BusinessError) => {
+        hilog.error(DOMAIN, TAG, 'openSessionPage failed: %{public}s', String(error));
+      });
     }
   }
 
