@@ -62,6 +62,8 @@ export interface ConversationUpdate {
 
 interface SendTextPayload {
   text: string;
+  /** 按次提交的协作模式（build/plan；问答档待 Q3 澄清）。缺省走服务端会话当前模式。 */
+  mode?: string;
 }
 
 interface StopPayload {
@@ -450,12 +452,15 @@ export class WorkbenchController {
 
   // ── 命令面（全部走 engine 幂等队列）──
 
-  async sendText(sessionId: string, text: string): Promise<void> {
+  /** 发送文本；mode 为按次协作模式（'build'|'plan'，空串 = 跟随服务端会话当前模式）。 */
+  async sendText(sessionId: string, text: string, mode: string): Promise<void> {
     const engine = this.engine;
     if (engine === null) {
       throw new Error('未连接');
     }
-    const payload: SendTextPayload = { text: text };
+    const payload: SendTextPayload = mode.length > 0
+      ? { text: text, mode: mode }
+      : { text: text };
     await engine.sendCommand(sessionId, 'sendText', payload);
   }
 
