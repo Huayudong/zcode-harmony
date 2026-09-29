@@ -627,6 +627,17 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 环境偏差 | ⚠️ | 加密驱动第三次复发且首次带病推送（`; `命令链绕过守卫——Index.ets 密文入 1f4cc47 并推远）→ stdin 根治 + amend + force-with-lease 修正为 7f8dc30；教训：扫描命中必须中止整条命令链 |
 | 真机批遗留 | — | TaskPool 投递切换、AST 帧间 diff、16ms 实测帧率（6.3 表）——需 Profiler 基线 |
 
+### Batch 16（2026-09-29）：V1 收尾补全——问答模式（Q3）/ 拍照直拍 / TaskPool 投递（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| INP-6 问答档 | ✅ | 输入舱第三档「问答」；控制器 `ask→plan` 映射（计划 §9-Q3 推荐方案：App 端本地概念 + plan 执行语义），映射集中在 sendText 一行，产品复核返工面最小 |
+| INP-3 拍照直拍 | ✅ | cameraPicker.pick（系统安全组件，BACK_CAMERA+PHOTO；本 SDK 为三参 pick+PickerProfile 必填 cameraPosition+单数 resultUri）；拍摄结果接入既有附件上传编排 |
+| OUT-1 TaskPool | ✅ | MdParserTask（@Concurrent 纯函数投递，API11+ 支持导入引用；预览器 catch 降级同步）；会话事件路径分块预计算 + 代际守卫丢弃过期填充；渲染取块优先缓存、首帧同步兜底 |
+| 门禁 | ✅ 22/22 + 构建 | spec：鸿蒙仓 `docs/specs/batch16-final-gaps.md` |
+| 环境偏差 | ⚠️ | 加密驱动复发 + 首次带病推送（add -A 卷入调试残留；守卫 \'&&…||…&&\' 优先级错误）→ 7 文件 stdin 重入库 + 索引移除杂项 + amend + force-with-lease 修正为 52c24b3；`git add -A` 此后禁用，改显式清单暂存 |
+| 真机批遗留 | — | 相机/TaskPool 并发行为实测、问答档执行语义产品复核 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
