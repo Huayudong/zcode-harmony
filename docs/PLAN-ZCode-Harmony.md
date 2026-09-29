@@ -536,6 +536,36 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 
 经验与坑：① **加密驱动复发**：git.exe 读工作树被驱动给密文入库（git grep --cached 全量命中、系统 grep 干净）→ 新增 `tools/stage-via-stdin.cjs`：明文经 stdin 管道 hash-object 入库 + update-index 挂载（管道不经文件系统），79 文件全部明文入库后提交树复扫干净；提交后 git status 会显示伪差异（工作树哈希读到密文），无害，驱动白名单 git 后正常 add 自愈。② zod 迁移产物：`tools/migrate-zod-boundary.cjs`。③ 原包侧测试依赖 `@zcode/model-option-map`（F: 盘残缺安装无 workspace 链接）→ vendor 到测试 node_modules + tsconfig paths。
 
+### Batch 7（2026-09-29）：A5 工作台 UI——会话列表 + 渲染管线 + SQLite 缓存（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 投影层 | ✅ | `commons/protocol/v4/WorkbenchModel.ts`：订阅帧→具体类型视图（SessionsIndexModel/ConversationModel），行归并复用 apply.ts（黄金测试同源），缓存 JSON 往返；fixture 过原 schema 门禁 |
+| 控制器 + 缓存 | ✅ | `commons/connection/workbench/`：WorkbenchController（进程单例：档案→AssetKit token→沙箱 CA→server-info→引擎；帧按 topic 分发归约、写穿缓存）+ SessionCache（relationalStore 两表，全兜底） |
+| 页面 | ✅ | SessionList（状态头/会话卡片/空态）、SessionDetail（9 类行视图+输入面）、Index 已配对自动进工作台 |
+| 门禁 | ✅ 16/16 + 构建 | 新增 workbench-model.test.mjs（fixture 先过 sessionSummary/rows/delta schema）；assembleHap SUCCESSFUL；spec：鸿蒙仓 `docs/specs/a5-workbench.md` |
+| 环境偏差 | ⚠️ | ①原包路径 F:→E:（F 盘 zcode 残缺仅剩 .git），zod 按 vendor+tsconfig paths 补齐入 devDeps；②预览渲染受阻：Previewer 加载自身 SDK 模块失败（对照页同挂，疑 TSD 驱动拦截），W-4 待环境恢复；③git add 再遭密文污染（4 文件，stdin 管道根治） |
+
+### Batch 8（2026-09-29）：OUT-3/4 批准卡片（App，M1 准出 S2 的 App 侧）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 投影 | ✅ | PendingInteractionView：permission（summary/toolName/服务端选项词表）、userInput（单问题 prompt+顶层 options；AskUserQuestion 取 questions[current]）；state.updated{pendingInteractions} 整体替换即卡片坍缩 |
+| 命令面 | ✅ | ConnectionEngine CommandType +resolveInteraction；controller.resolveInteraction（信封 Engine 生成幂等 commandId，离线入队） |
+| UI | ✅ | SessionDetail 吸底 ApprovalCard：按服务端词表渲染按钮（allow 品牌实心/deny 红字），freeText 输入行，应答中锁定，竞态以 CLI 准入为准（无本地乐观移除） |
+| 门禁 | ✅ 17/17 + 构建 | fixture 过 pendingInteractionSchema + resolveInteraction 信封校验（缺 answer 拒绝）；spec：鸿蒙仓 `docs/specs/a7-approval.md`；S2 真机全链路待通道 |
+
+### Batch 9（2026-09-29）：A6 输入区主体（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| INP-1 输入舱 | ✅ | TextArea 1→6 行内部滚动（constraintSize 156vp）、聚焦品牌色描边+泛光 shadow |
+| INP-6 模式选择 | ✅ | Agent(build)/Plan(plan) 按次提交 sendText.mode（**不走 switchCollaborationMode**，不改服务端会话态；问答档待 Q3，词表外值由信封 schema 拒绝） |
+| INP-5 快捷指令 | ✅ | 内置 4 chips 横滑（继续/跑测试/解释这段 diff/换个思路），点击填入 |
+| INP-7 发送/停止 | ✅ | 同位形变（品牌实心↔destructive 描边 800ms）；停止需二次长按（arm+2.5s 超时解除） |
+| INP-8 草稿 | ✅ | preferences 按会话持久（draft_<sessionId>，500ms 去抖+离页即存+发送即清） |
+| 门禁 | ✅ 18/18 + 构建 | sendText.mode 信封测试；spec：鸿蒙仓 `docs/specs/a6-input.md`；INP-3 附件/INP-4 @引用因服务通道缺口（v4 分块上传/workspaceFileSearch）待 L3 stub 扩展批 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
