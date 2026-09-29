@@ -22,6 +22,7 @@ import {
   SessionsIndexModel,
   type ConversationRowView,
   type Event,
+  type PendingInteractionView,
   type SessionSummaryView,
   type V4Fault,
   type V4TopicFrame,
@@ -50,12 +51,13 @@ const CONVERSATION_FLUSH_DEBOUNCE_MS: number = 1500;
 /** 连接三要素之一不可用时的停机态详情（UI 据此给重试/重新配对入口）。 */
 type StartupFailure = 'no-profile' | 'no-token' | 'unreachable' | 'no-workspace';
 
-/** 会话页可观察的对话面（行视图 + 标题 + 是否有流式工作）。 */
+/** 会话页可观察的对话面（行视图 + 标题 + 是否有流式工作 + 待批交互）。 */
 export interface ConversationUpdate {
   sessionId: string;
   rows: ConversationRowView[];
   hasLiveWork: boolean;
   title: string;
+  pending: PendingInteractionView[];
 }
 
 interface SendTextPayload {
@@ -64,6 +66,17 @@ interface SendTextPayload {
 
 interface StopPayload {
   expectedForegroundExecutionId?: string;
+}
+
+/** 批准/应答选择（OUT-4）：选项 id 或自由文本，二者至多一。 */
+export interface ResolveAnswer {
+  optionId?: string;
+  freeText?: string;
+}
+
+interface ResolveInteractionPayload {
+  interactionId: string;
+  answer: ResolveAnswer;
 }
 
 /** 缓存装载用的快照载荷形状（与服务端 sessions-index snapshot 同构的最小集）。 */
@@ -455,6 +468,19 @@ export class WorkbenchController {
     await engine.sendCommand(sessionId, 'stop', payload);
   }
 
+  /**
+   * 批准/应答（OUT-4）：按服务端词表回 optionId（permission 的允许/拒绝、
+   * userInput 的题面选项）或自由文本；interactionId 幂等，多端竞态以 CLI 准入为准。
+   */
+  async resolveInteraction(sessionId: string, interactionId: string, answer: ResolveAnswer): Promise<void> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    const payload: ResolveInteractionPayload = { interactionId: interactionId, answer: answer };
+    await engine.sendCommand(sessionId, 'resolveInteraction', payload);
+  }
+
   // ── 视图事件 ──
 
   private fireSessions(): void {
@@ -471,6 +497,7 @@ export class WorkbenchController {
       rows: model.rows(),
       hasLiveWork: model.hasLiveWork(),
       title: model.title(),
+      pending: model.pendingInteractions(),
     };
     this.conversationEmitter.fire(update);
   }

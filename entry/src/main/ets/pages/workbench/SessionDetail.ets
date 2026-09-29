@@ -1,7 +1,7 @@
 import router from '@ohos.router';
-import { WorkbenchController, type ConversationUpdate } from 'connection';
+import { WorkbenchController, type ConversationUpdate, type ResolveAnswer } from 'connection';
 import type { ConnectionStateEvent } from 'connection';
-import type { ConversationRowView, IDisposable } from 'protocol';
+import type { ConversationRowView, PendingInteractionView, PendingInteractionOptionView, IDisposable } from 'protocol';
 import { ZcodeColors, StatusDot, StatusTone } from 'uikit';
 
 /** 会话列表 → 会话页的路由参数（与 SessionList 侧同构）。 */
@@ -11,7 +11,8 @@ interface SessionRouteParams {
 }
 
 /**
- * 会话页（A5 渲染管线）：行视图 = ConversationModel 投影，流式 delta 到达即整表重绘。
+ * 会话页（A5 渲染管线 + 批次8 OUT-3/4 批准卡片）：行视图 = ConversationModel 投影，
+ * 流式 delta 到达即整表重绘；待批交互吸底卡片，按服务端词表应答（interactionId 幂等）。
  * 底部输入面 sendText 走 engine 幂等队列（离线入队、重连自动投递）。
  */
 @Entry
@@ -25,6 +26,9 @@ struct SessionDetail {
   @State stateEvent: ConnectionStateEvent = { state: 'offline', detail: '' } as ConnectionStateEvent;
   @State expandedRowIds: number[] = [];
   @State sendHint: string = '';
+  @State pending: PendingInteractionView[] = [];
+  @State resolvingId: string = '';
+  @State pendingFreeText: string = '';
   private controller: WorkbenchController | null = null;
   private sessionId: string = '';
   private disposables: IDisposable[] = [];
@@ -61,6 +65,12 @@ struct SessionDetail {
       }
       this.rows = update.rows;
       this.hasLiveWork = update.hasLiveWork;
+      this.pending = update.pending;
+      // 服务端投影已把该交互移除（CLI 准入完成）→ 解除按钮锁定
+      if (this.resolvingId.length > 0
+        && update.pending.findIndex((item: PendingInteractionView) => item.interactionId === this.resolvingId) < 0) {
+        this.resolvingId = '';
+      }
       if (update.title.length > 0) {
         this.sessionTitle = update.title;
       }
@@ -136,8 +146,134 @@ struct SessionDetail {
     }
   }
 
+  /** 批准/应答（OUT-4）：interactionId 幂等，竞态以 CLI 准入为准。 */
+  private async resolve(item: PendingInteractionView, answer: ResolveAnswer): Promise<void> {
+    if (this.resolvingId.length > 0 || this.controller === null || this.sessionId.length === 0) {
+      return;
+    }
+    this.resolvingId = item.interactionId;
+    try {
+      await this.controller.resolveInteraction(this.sessionId, item.interactionId, answer);
+      this.sendHint = '';
+      this.pendingFreeText = '';
+    } catch (error) {
+      this.sendHint = `应答失败：${error instanceof Error ? error.message : String(error)}`;
+      this.resolvingId = '';
+    }
+  }
+
+  private optionFontColor(item: PendingInteractionOptionView): string {
+    if (item.kind === 'deny') {
+      return ZcodeColors.DESTRUCTIVE;
+    }
+    if (item.kind === 'allowOnce' || item.kind === 'allowAlways') {
+      return '#FFFFFF';
+    }
+    return ZcodeColors.textSecondary();
+  }
+
+  private optionBackground(item: PendingInteractionOptionView): string {
+    if (item.kind === 'allowOnce' || item.kind === 'allowAlways') {
+      return ZcodeColors.BRAND;
+    }
+    return ZcodeColors.SURFACE;
+  }
+
   private secondsOf(ms: number): string {
     return ms > 0 ? `${Math.max(1, Math.round(ms / 1000))}s` : '';
+  }
+
+  @Builder
+  ApprovalCard(item: PendingInteractionView) {
+    Column({ space: 10 }) {
+      Row({ space: 8 }) {
+        StatusDot({ tone: StatusTone.PendingConfirm, dotSize: 10 })
+        if (item.toolName.length > 0) {
+          Text(item.toolName)
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ZcodeColors.textPrimary())
+        }
+        Text(item.kind === 'permission' ? '待批准' : (item.kind === 'userInput' ? '待回答' : '待审核'))
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+        Blank()
+        if (this.resolvingId === item.interactionId) {
+          Text('已应答，等待电脑确认…')
+            .fontSize(11)
+            .fontColor(ZcodeColors.textTertiary())
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text(item.title)
+        .fontSize(14)
+        .fontColor(ZcodeColors.textPrimary())
+        .maxLines(4)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      if (item.kind === 'workspaceHookReview') {
+        Text('工作区 Hook 审核请在桌面端处理')
+          .fontSize(12)
+          .fontColor(ZcodeColors.textTertiary())
+      } else {
+        Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+          ForEach(item.options, (option: PendingInteractionOptionView) => {
+            Button(option.label)
+              .fontSize(13)
+              .fontColor(this.optionFontColor(option))
+              .backgroundColor(this.optionBackground(option))
+              .borderRadius(10)
+              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+              .margin({ right: 8, bottom: 8 })
+              .enabled(this.resolvingId.length === 0)
+              .onClick(() => {
+                const answer: ResolveAnswer = { optionId: option.optionId };
+                void this.resolve(item, answer);
+              })
+          }, (option: PendingInteractionOptionView) => `${item.interactionId}-${option.optionId}`)
+        }
+        .width('100%')
+
+        if (item.freeText) {
+          Row({ space: 8 }) {
+            TextInput({
+              text: this.pendingFreeText,
+              placeholder: item.sensitive ? '输入敏感内容（不进历史）…' : '输入自定义答复…',
+            })
+              .fontSize(13)
+              .fontColor(ZcodeColors.textPrimary())
+              .placeholderColor(ZcodeColors.textTertiary())
+              .backgroundColor(ZcodeColors.background())
+              .borderRadius(10)
+              .layoutWeight(1)
+              .onChange((value: string) => {
+                this.pendingFreeText = value;
+              })
+            Button('发送')
+              .fontSize(13)
+              .fontColor(this.pendingFreeText.trim().length > 0 ? '#FFFFFF' : ZcodeColors.textTertiary())
+              .backgroundColor(this.pendingFreeText.trim().length > 0 ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
+              .borderRadius(10)
+              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+              .enabled(this.resolvingId.length === 0 && this.pendingFreeText.trim().length > 0)
+              .onClick(() => {
+                const answer: ResolveAnswer = { freeText: this.pendingFreeText.trim() };
+                void this.resolve(item, answer);
+              })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+        }
+      }
+    }
+    .width('100%')
+    .padding(14)
+    .borderRadius(14)
+    .border({ width: 1, color: ZcodeColors.WARNING })
+    .backgroundColor(ZcodeColors.card())
+    .margin({ top: 6 })
   }
 
   @Builder
@@ -339,6 +475,15 @@ struct SessionDetail {
       .layoutWeight(1)
       .padding({ left: 16, right: 16, top: 4 })
       .scrollBar(BarState.Off)
+
+      // OUT-3/4：吸底待批卡片
+      Column() {
+        ForEach(this.pending, (item: PendingInteractionView) => {
+          this.ApprovalCard(item)
+        }, (item: PendingInteractionView) => `${item.interactionId}-${item.options.length}-${item.title.length}`)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16 })
 
       // 发送提示 / 输入面
       if (this.sendHint.length > 0) {

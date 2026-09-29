@@ -109,5 +109,7 @@ export {
   ConversationModel,
   type SessionSummaryView,
   type ConversationRowView,
+  type PendingInteractionView,
+  type PendingInteractionOptionView,
   type WorkbenchFrameLike
 } from './src/main/ets/v4/WorkbenchModel';

@@ -25,5 +25,6 @@ export {
 export { SessionCache, type CachedConversation } from './src/main/ets/workbench/SessionCache';
 export {
   WorkbenchController,
-  type ConversationUpdate
+  type ConversationUpdate,
+  type ResolveAnswer
 } from './src/main/ets/workbench/WorkbenchController';
