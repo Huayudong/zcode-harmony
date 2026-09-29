@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import router from '@ohos.router';
 import { isPairLink, PairRouteParams } from 'connection';
+import { PerfMarks } from 'utils';
 import { BusinessError } from '@ohos.base';
 
 const DOMAIN: number = 0x0000;
@@ -13,6 +14,7 @@ export default class EntryAbility extends UIAbility {
   private pendingPairLink: string = '';
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    PerfMarks.mark('cold_start');
     hilog.info(DOMAIN, TAG, 'onCreate, uri=%{public}s', want.uri ?? '');
     // 冷启动深链：onNewWant 不会再触发，先暂存、页面栈就绪后路由。
     if (isPairLink(want.uri ?? '')) {

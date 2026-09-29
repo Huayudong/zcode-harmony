@@ -1,4 +1,5 @@
 export { Breakpoint, BreakpointLevel } from './src/main/ets/breakpoint/Breakpoint';
+export { PerfMarks } from './src/main/ets/perf/PerfMarks';
 export {
   parseMarkdownBlocks,
   parseInlineSpans,

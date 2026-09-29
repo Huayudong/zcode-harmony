@@ -18,6 +18,7 @@ import common from '@ohos.app.ability.common';
 import notificationManager from '@ohos.notificationManager';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { PerfMarks } from 'utils';
 import {
   ConversationModel,
   Emitter,
@@ -528,6 +529,7 @@ export class WorkbenchController {
       return;
     }
     if (frame.topic.startsWith('conversation/')) {
+      PerfMarks.mark('chunk_in');
       const sessionId = frame.topic.substring('conversation/'.length);
       const model = this.conversationModels.get(sessionId);
       if (model !== undefined && model.applyFrame(frame)) {
@@ -546,6 +548,7 @@ export class WorkbenchController {
       return;
     }
     this.fireConversation(sessionId);
+    PerfMarks.measure('6.3 chunk 上屏(帧到达→视图事件, 逻辑段)', 'chunk_in', 2000);
     const timer = setTimeout((): void => {
       this.conversationFireTimers.delete(sessionId);
       if (this.pendingConversationFire.delete(sessionId)) {
