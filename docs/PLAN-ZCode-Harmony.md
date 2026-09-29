@@ -442,10 +442,99 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | E1-3 server.auth managed 模块 | ✅ | `packages/server/src/auth/`（module/contract/contract.example/CONTRACT.md + domain/app/adapters 三层）；`architecture-policy.yaml` 注册；`knip.json` 增条目 |
 | E1-4 server-core 条件放行（D1 决策：动） | ✅ | `packages/zcode-server-cli/src/server-core/http.ts`：`authToken` 选项 + 仅管理员 token 中间件；非 loopback 仅在无 token 时 fail-closed；`core.ts` 继承 env 接线 |
 | E7 测试基建 | ✅ | `packages/server/test/helpers/testServer.ts` + 两包 `test` script（node --import tsx --test） |
-| E1 测试 | ✅ | `packages/server/test/auth.test.ts`（A1-A10 + WS upgrade 保护 + 默认开放回归）、`packages/zcode-server-cli/test/coreHttp.test.ts`（A11/A12 + loopback 开放回归） |
-| 验证门禁 | 见下方实际结果 | typecheck / lint / fmt:check / architecture:check --changed / knip / 两包测试 |
+| E1 测试 | ✅ 13/13 + 3/3 通过 | `packages/server/test/auth.test.ts`（A1-A10 + WS upgrade 保护 + 默认开放回归）、`packages/zcode-server-cli/test/coreHttp.test.ts`（A11/A12 + loopback 开放回归） |
+| 验证门禁 | ✅ 核心门禁全绿（详见下方环境说明） | typecheck 全仓 0 错误（11 工程）；architecture:check 全量 0 违规 / 0 新增；lint 定向扫描改动路径 318 文件 0 错误（7 个警告全部来自未改动代码） |
 
-环境偏差：本机无 mise/Node 24（nvm 仅有 22/20/16），以 Node 22.22.0 执行全部门禁（`.npmrc` 未启用 engine-strict）；依赖安装使用 npmmirror 镜像（registry.npmjs.org 在本机停滞）。
+### 门禁环境说明（如实记录）
+
+1. **运行环境偏差**：本机无 mise/Node 24（nvm 仅有 22/20/16），以 Node 22.22.0 执行（`.npmrc` 未启用 engine-strict）；依赖安装使用 npmmirror 镜像。
+2. **验证在 D 盘克隆上执行**：`F:` 为 USB 闪存盘（实测有效速度约 23KB/s），全量安装在其上不可行。已将工作树完整克隆到 `D:\zcode-build`（robocopy 7022 文件 0 失败，全部改动文件逐一 cmp 校验一致）并在其上安装依赖（hoisted 布局，34.7s）执行门禁；`F:` 工作树只承载代码改动本身。
+3. **lint 全量扫描受阻（环境）**：oxlint 配置发现在 `apps/zcode-cli/packages/cli/node_modules` 的嵌套配置处失败（完整安装后的 pnpm 嵌套布局 + 该包自带 `.oxlintrc.json` 的父级相对引用），失败路径全部位于本批未触碰的 `apps/` 域；已用定向扫描（0 错误）替代验证。
+4. **fmt:check / knip 环境受阻**：本机透明加密驱动导致原生进程（node/oxfmt/git.exe）对部分 `.mjs`/配置读到密文（MSYS 工具读到明文）。`fmt:check` 对逐字节一致的未改动基线文件（如 `packages/services/src/storage` 13/13）也全量报格式问题，属基线级环境问题；knip 在 fast-glob 枚举中遇到驱动损坏的脏路径稳定崩溃。两者均与本批改动无关。
+5. 遗留：`D:\zcode-build` 为一次性验证克隆，确认后可删除；`F:` 工作树的首次全量安装建议在更换 SSD 或处理加密驱动后执行。
+
+### Batch 2（2026-09-22）：E2 配对服务实现（服务端闭环）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| pairing spec 细化 | ✅ | `docs/specs/harmony/pairing.md`：鉴权分级（adminOnlyPaths/publicPaths）、频控窗口细节、claim 同步段原子性、二维码 URL 改由桌面 UI 拼装（server 的 host 可能是 0.0.0.0，Web 用自身 location 才是手机可达地址） |
+| auth 契约扩展 | ✅ | 导出 `normalizeDeviceName`/`constantTimeHexEqual`/`sha256TokenHasher`；新增 `DeviceTokenLimitError`（issue 达上限时抛出） |
+| tokenGuard 鉴权分级 | ✅ | `adminOnlyPaths`（设备 token → 403）、`publicPaths`（claim 免管理员鉴权，由一次性 pairCode 自保） |
+| server.pairing 受控模块 | ✅ | `packages/server/src/pairing/`：domain（pairCode 判定+请求 schema）/app（单活跃码 + 同步段消费 + 频控计数器）/adapters（组合根 + Hono 四路由）；契约四件套；`architecture-policy.yaml` 注册 `server.pairing`（requires [server.auth]） |
+| REST 端点 | ✅ | `POST /api/pairing/code`（管理员）、`POST /api/pairing/claim`（公开+频控 10 次/分/IP，429+Retry-After）、`GET /api/pairing/devices`、`DELETE /api/pairing/devices/:id` |
+| http/entry 接线 | ✅ | `pairingService`/`certFingerprint` 进入 `HttpServerOptions`；entry-http 在有管理员 token 时与设备表一同接线 |
+| 配对测试 | ✅ 9/9 通过 | P1 全链路、P2 重放 401、P3 TTL 过期、P4 并发唯一成功、P5 设备 token 403、频控 429、body 校验、吊销端点、设备上限 409 且不回滚 |
+| 门禁 | ✅ | server 测试 22/22（auth 13 + pairing 9）、server-cli 3/3、typecheck 全仓 0 错误、architecture 全量 0 违规（含新模块）、定向 lint 0 错误（环境限制同 Batch 1） |
+
+范围调整：桌面 Web 设置页出码分区（spec §5）移至 Batch 3，与 E3 TLS 同批（同属"桌面出码体验"主题）；Batch 2 的配对链路已可通过 HTTP 全流程闭环并被测试覆盖。环境问题（F 盘 USB I/O、透明加密驱动）沿用 Batch 1 的 D 盘克隆验证方案。
+
+### Batch 3（2026-09-22）：E3 自签 TLS + 桌面出码分区
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| tls spec | ✅ | `docs/specs/harmony/tls.md`（材料三方式、指纹口径、fail-fast、验收 T1-T5） |
+| server.tls 受控模块 | ✅ | `packages/server/src/tls/`：domain（forge 自签生成 + SPKI SHA-256 指纹，无 node: 依赖）/adapters（`resolveTlsMaterial`：显式 PEM → 自签幂等 → 无）；契约四件套 + `node-forge.d.ts` 最小环境声明；`architecture-policy.yaml` 注册 `server.tls` |
+| HTTPS 接入 | ✅ | `http.ts`：`https.createServer + getRequestListener + injectWebSocket`（WSS 同源升级不变）；`entry-http` 读取 `ZCODE_SERVER_TLS_CERT/KEY`、`ZCODE_SERVER_TLS_SELF_SIGNED=1`，解析失败 fail-fast 阻止启动；非 loopback 无 TLS 时启动明文风险 warn |
+| 指纹下发 | ✅ | `server-info.capabilities.certFingerprint`（additive）；配对 code/claim 响应携带同一指纹（App 端 QR `fp` 证书固定） |
+| TLS 测试 | ✅ 6/6 通过 | T1 指纹与 node `X509Certificate` 独立计算一致、T2 HTTPS server-info、T3 配对响应同指纹、T4 fail-fast、T5 纯 HTTP 回归、自签幂等 |
+| 桌面出码分区 | ✅ | `packages/ui/src/settings/MobilePairingSection.tsx`（同源 REST 出码/二维码/倒计时/设备列表/二次确认吊销）；三处注册（settingsNavigation/settingsPageConfig/SettingsPage）；i18n zh-CN + en-US 文案；桌面形态显示占位说明（Q1 未决）。qrcode 复用既有依赖，零新增 |
+| 网络指南 | ✅ | `docs/harmony-networking.md`：Tailscale（推荐）/局域网直连/自有证书与反代三方案 + "不要端口映射裸奔"告诫 |
+| 门禁 | ✅ | server 测试 28/28（auth 13 + pairing 9 + tls 6，串行跑两遍稳定——并行时 auth 用例曾出现 Windows rename 竞争偶发，test script 已加 `--test-concurrency=1`）、server-cli 3/3、typecheck 全仓 0 错误、architecture 0 违规（含 server.tls）、定向 lint 0 错误且新文件 0 警告 |
+
+### Batch 4（2026-09-22）：鸿蒙仓脚手架 + 协议移植第一层 + zod spike
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 鸿蒙仓创建 | ✅ | **仓库位置调整为 `E:\program\zcode-harmony`**（用户决策：F 盘 USB 读写太慢；旧 `F:\program\zcode-harmony` 目录弃用）。hap 多模块工程：entry + commons/{uikit,utils,protocol}（HAR），API 12 stageMode，git 已 init（commit e911822，**远程地址待用户提供后推送**） |
+| entry 模块 | ✅ | 首页演示主题/光感按钮/状态灯；`zcode://pair` 深链 skills 预留 + INTERNET/VIBRATE 权限 |
+| uikit | ✅ | `ZcodeColors` 语义色 token（PRD 5.2 映射、深色默认）、`LightBloomButton`（L1 四层光感 + 按压状态机 + destructive 描边变体；Vibrator 后续接入）、`StatusDot` 三态灯（1s 心跳脉冲） |
+| protocol 移植 P1 | ✅ | `@zcode/rpc` L0-L2：VSBuffer / 序列化（VQL+类型标签，纯 TS base64 替换 Buffer/btoa 探测）/ Emitter 子集 / ChunkStream + SocketProtocol + createQueuePair。ArkTS 严格转换在 DevEco 就绪后按编译反馈收敛（.ts 文件先行） |
+| 协议一致性门禁 | ✅ 6/6 通过 | `tools/protocol-consistency`：同向量喂原包（`@zcode/rpc` TS 源）与移植层，**编码逐字节一致**（16 基础类型 + Uint8Array + 嵌套 base64 恢复 + 嵌套对象）、13 字节帧逐字节一致、1/3/7/2/11 奇数边界分片重组消息序列一致、queuePair 环回。运行：`cd tools/protocol-consistency && npm i && npm test` |
+| zod spike 阶段 1 | ✅ 初步可行 | `docs/spike-zod-arkts.md`：第三方 npm 消费不受 ArkTS 严格检查约束、运行时 API 兼容、本仓库用量为核心稳定 API；阶段 2 动态验证清单（hvigor 构建 + 冒烟 + 性能基线）待 DevEco 就绪执行 |
+
+门禁说明：本批验证在 E 盘本仓直接执行（一致性测试 6/6；ArkTS 编译验证属 DevEco 阶段，未执行——需 DevEco Studio Sync + 构建，已如实标注）。
+
+### Batch 4 收尾（2026-09-22）：DevEco 构建打通 + ArkTS 编译收敛 + Previewer 首页渲染验证（commit 46dd382，已推送）
+
+| 项 | 结果 |
+| --- | --- |
+| 构建配置修复 | 根 `oh-package.json5` 补 `modelVersion`（hvigor 6.24.4 要求与 hvigor-config.json5 同时声明）；`entry/hvigorfile.ts` 误用 `appTasks` 改为 `hapTasks`；补齐三个 HAR 的 `src/main/module.json5`；`build-profile.json5` 增加 `preview` buildModeSet 与 `targetSdkVersion`（同时消除 IDE 打开时的「配置targetSdkVersion」模态框） |
+| ArkTS 编译收敛 | 10 个编译错误清零：`Breakpoint.ets` 枚举与类同名声明合并非法 → 拆为 `BreakpointLevel` 枚举 + `Breakpoint` 工具类单一所有者（吸收 BreakpointUtil）；`StatusDot.size`→`dotSize`、`LightBloomButton.enabled`→`isEnabled`（避开 ArkUI CustomComponent 基类同名通用属性） |
+| 构建验证 | `hvigorw --mode module -p module=entry@default assembleHap` **BUILD SUCCESSFUL**（entry-default-unsigned.hap；无签名配置跳过签名属预期）；DevEco Studio 6.1 打开工程 hvigor sync 成功（约 40s） |
+| Previewer 渲染验证 | CLI 生成 `.preview` 产物（`PreviewBuild` + `-p previewMode=true -p buildRoot=.preview` 等 IDE 同款参数）后，直接以完整参数拉起 `Previewer.exe` 无头渲染：`-ljPath loader.json`（模块映射关键参数，缺它报 `Cannot find module 'ets/pages/Index'`）+ `-rt/-rp/-cjp/-j/-abp` 等；引擎 websocket（127.0.0.1 随机端口）以 `12345678` 魔数帧输出 1080×2340 JPEG 渲染帧，约 2 帧/秒交替（StatusDot 脉冲动画存活证据）。OCR 比对全部 UI 元素命中：ZCode Harmony / 副标题 / 正在重构模块 / 发送（宽屏）/ 已发送 0 条 / v0.1.0 scaffold·sm。截图入库：`docs/preview-首页效果-批次4.jpg` |
+
+经验记录：① 本机透明加密驱动导致本会话所有新写图片文件无法被 Read 工具解码（旧文件正常），视觉验证改走「抓帧→Windows OCR（PowerShell WinRT）」文本通道；② DevEco Previewer 完整参数可从 `idea.log` 的 `Start engine args` / `HvigorRunConfiguration` 行反推，无需启动 IDE。
+
+### Batch 5（2026-09-23）：A3 配对向导 + 最小连接层（App）+ 配对证书端点（Server）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 信任链设计 | ✅ | **证书带外分发**：ohos TLS 栈无自定义校验钩子、自签证书首次接触必拒 → 证书经二维码深链带外分发（桌面新端点 `GET /api/pairing/cert` 公开返回 PEM，QR 追加 `cert=<base64 DER>`），App 本地校验 SHA-256(SPKI)===fp（cryptoFramework）后落沙箱作 caPath 固定（http/webSocket `caPath` @since 12）。spec：鸿蒙仓 `docs/specs/a3-pairing.md` §1.1 + 本仓 pairing.md 增补 |
+| Server 增补 | ✅ 测试 10/10 | `GET /api/pairing/cert`（publicPaths，无 TLS 404）；MobilePairingSection 出码取 PEM 拼 QR（P7 路由层用例） |
+| App 连接层 | ✅ 构建通过 | 鸿蒙仓新增 `commons/connection` HAR：PairCodeLink（深链解析）、CertPinning（SPKI SHA-256）、PinnedHttpClient（固定 CA JSON 客户端 + 封闭错误枚举）、WsProbe（WSS 握手探针）、PairingClient（claim/server-info）、ProfileStore（preferences）/AssetTokenStore（Asset Kit，token 不落明文） |
+| App 页面 | ✅ 构建通过 | 首页未连接态改造；ONB-1 欢迎页；ONB-4 粘贴深链/手动表单（解析摘要 + 指纹状态展示）；ONB-5 三步自检（①HTTPS+claim ②WSS 握手为真实探测、③会话拉取占位待 L3/L4）；EntryAbility `zcode://pair` 冷/热启动路由。arkts 收敛：@ohos 模块默认导入、无 any/unknown、对象字面量全部显式类型 |
+| 渲染验证 | ⚠️ 部分 | Index 未连接态渲染验证通过（`docs/preview-首页-未连接.jpg`，OCR 全元素命中）；向导三页复验被**本机 commit 内存耗尽**阻塞（ArkRuntime 512MB 连续虚拟内存申请失败 err 1455，机器 commit 34.9/36.3GB），复验命令：`tools/preview/render-page.js <page> <out.jpg> 12000 .preview`（需先 PreviewBuild + FakeUIAbility 指向目标页 + 核对产物路由表——增量缓存可能过期，坑已记录在脚本头注释） |
+| 组件修复 | ✅ | LightBloomButton：linearGradient/shadow 传 undefined 在预览器兼容层触发 0xc0000005 崩溃 → 一律传对象值 |
+
+经验：① ArkTS 中 @ohos 模块需默认导入（命名导入只带值不带类型命名空间，级联 any 推断错误）；② 预览产物 `.preview` 的 main_pages.json 受增量缓存影响可能过期，RunPage 未注册页会原生崩溃；③ 驱动对 bash/sed 写入的文件会让 hvigor 随机读出 ENOENT/RollupError，用 node 重写文件可复位；④ 加密驱动会把 git 暂存的二进制读成块对齐密文（截图提交 73102→77824B），重新 add 即恢复明文。
+
+
+### Batch 6（2026-09-23）：WSS 之上的 RPC 会话层（L1-L5）+ A4 重连引擎（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| L1 收尾 | ✅ | `commons/protocol/rpc/PersistentProtocol.ts`：ACK 确认、5s 心跳、20s ACK 超时、重放缓冲（8MiB/45s）、拥塞水位信号（onSaturated/onDrained） |
+| L2 | ✅ | Channels（const-enum→对象常量）+ ChannelClient：请求/响应/事件同 id 空间；连接终结挂起 Promise fail-closed |
+| L4 v4 子集 | ✅ | 43 文件闭包（transport/sessions-index/snapshot/rows/delta/command/wire 装配/apply/coalesce/workflow-runs 等）；由 `tools/port-v4-deps.cjs`（闭包拷贝+导入改写）+ `tools/prune-v4.cjs`（可达性剪枝）产出 |
+| zod 边界 | ✅ 关键决策 | **spike 阶段2 发现 ArkTS 编译器无法消费 zod4 d.ts**（复杂泛型调用点坍缩 any，首轮 452 错）→ `v4/zod-ambient.ts` 类型域收敛 any，运行时真 zod（双端同包）；.ets 消费端手写本地接口；zod@4.6.5 经 ohpm 本地 tgz（ohpm 源无 npm 包、无 npm_registry 回退配置） |
+| L3 | ✅ | AgentV4Stub 显式桩（无 ES6 Proxy：call=方法名+参数数组、onDynamic*=listen(事件名,参数)）；AgentV4Client：hello 版本锁 fail-fast → clientHello mobileApp → 订阅 → TopicWireFrameAssembler 装配 → 水位记账 → resync → sendCommand（信封 schema 校验）；pre-ACK 帧缓冲按序放行（ackActivationBarrier 的最小化） |
+| L5 | ✅ | WebSocketTransport：@ohos.net.webSocket→ISocket，二进制帧→VSBuffer，wss 走 caPath 证书固定，升级请求带 Authorization: Bearer |
+| A4 重连引擎 | ✅ | ConnectionEngine：offline/connecting/online/backoff 三态机、退避 1s→2s→4s→8s→15s→30s、netAvailable 抢先重试、**带水位重订阅**（base={logEpoch,seq}→snapshot/resume，等价 same-sub resync 且服务端契约已定义）、PendingCommandQueue 断线命令 flush（commandId 幂等/TTL 24h/上限32）；链路与 web 同构（SocketProtocol 直连 /ws，PersistentProtocol 不在此链路——服务端不消费其 ACK/心跳帧） |
+| 自检③真实化 | ✅ | PullSessions：一次性连接订阅 sessions-index 等 snapshot；fetchServerInfo 增 workspaces 下发解析（workspace target）；自检页③接真实 v4 订阅 |
+| 一致性门禁 | ✅ 13/13 | 新增 session-consistency.test.mjs：①通道环回（移植 ChannelClient↔原包 ChannelServer+ProxyChannel）②持久层互操作（移植 PersistentProtocol↔原包，ACK/重放）③apply/coalesce 黄金双实现互证 ④分片装配双实现一致+ordinal 去重 ⑤端到端（握手版本锁→订阅→帧装配→水位→resync→幂等命令）⑥版本锁 fail-fast |
+| 构建门禁 | ✅ | hvigor assembleHap **BUILD SUCCESSFUL**（含 ohpm zod 打包）；spec：鸿蒙仓 `docs/specs/a4-session.md` |
+
+经验与坑：① **加密驱动复发**：git.exe 读工作树被驱动给密文入库（git grep --cached 全量命中、系统 grep 干净）→ 新增 `tools/stage-via-stdin.cjs`：明文经 stdin 管道 hash-object 入库 + update-index 挂载（管道不经文件系统），79 文件全部明文入库后提交树复扫干净；提交后 git status 会显示伪差异（工作树哈希读到密文），无害，驱动白名单 git 后正常 add 自愈。② zod 迁移产物：`tools/migrate-zod-boundary.cjs`。③ 原包侧测试依赖 `@zcode/model-option-map`（F: 盘残缺安装无 workspace 链接）→ vendor 到测试 node_modules + tsconfig paths。
 
 ## 11. 下一步（按顺序）
 
