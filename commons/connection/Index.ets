@@ -22,3 +22,8 @@ export {
   type EngineOptions,
   type CommandType
 } from './src/main/ets/session/ConnectionEngine';
+export { SessionCache, type CachedConversation } from './src/main/ets/workbench/SessionCache';
+export {
+  WorkbenchController,
+  type ConversationUpdate
+} from './src/main/ets/workbench/WorkbenchController';

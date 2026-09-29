@@ -6,7 +6,7 @@
  * 装配层：同一组分片喂移植/原包 TopicWireFrameAssembler，产出逻辑帧一致；
  * 端到端：移植 AgentV4Client 对接原包 ChannelServer 假 host（握手/订阅/帧/水位/resync/命令幂等）。
  *
- * 原包路径默认 F:/program/zcode/{packages/rpc/src,packages/shared/src}，环境变量可覆盖。
+ * 原包路径默认 E:/program/zcode（F: 盘残缺安装已弃用）/{packages/rpc/src,packages/shared/src}，环境变量可覆盖。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,8 +14,8 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const ORIGIN_RPC = process.env.ZCODE_RPC_SRC ?? 'F:/program/zcode/packages/rpc/src';
-const ORIGIN_SHARED = process.env.ZCODE_SHARED_SRC ?? 'F:/program/zcode/packages/shared/src';
+const ORIGIN_RPC = process.env.ZCODE_RPC_SRC ?? 'E:/program/zcode/packages/rpc/src';
+const ORIGIN_SHARED = process.env.ZCODE_SHARED_SRC ?? 'E:/program/zcode/packages/shared/src';
 const PORT_RPC = path.resolve(import.meta.dirname, '../../commons/protocol/src/main/ets/rpc');
 const PORT_V4 = path.resolve(import.meta.dirname, '../../commons/protocol/src/main/ets/v4');
 

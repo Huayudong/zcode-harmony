@@ -104,3 +104,10 @@ export {
 } from './src/main/ets/v4/command';
 export { TopicWireFrameAssembler } from './src/main/ets/v4/wire-assembler';
 export { crc32WireBytes, encodeWireBytesBase64, decodeWireBase64 } from './src/main/ets/v4/wire-binary';
+export {
+  SessionsIndexModel,
+  ConversationModel,
+  type SessionSummaryView,
+  type ConversationRowView,
+  type WorkbenchFrameLike
+} from './src/main/ets/v4/WorkbenchModel';

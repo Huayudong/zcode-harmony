@@ -17,9 +17,16 @@ PAGES=(
   "pages/pairing/PairingWelcome|欢迎页"
   "pages/pairing/PairingCodeInput|输入码页"
   "pages/pairing/PairingSelfCheck|自检页"
+  "pages/workbench/SessionList|工作台-会话列表"
+  "pages/workbench/SessionDetail|工作台-会话详情"
 )
+# 只渲染命令行传入的页名（子串匹配）；不传参渲染全部
+ONLY="${1:-}"
 for entry in "${PAGES[@]}"; do
   URL="${entry%%|*}"; NAME="${entry##*|}"
+  if [ -n "$ONLY" ] && [[ "$NAME" != *"$ONLY"* && "$URL" != *"$ONLY"* ]]; then
+    continue
+  fi
   cat > "$FAKE" <<EOF
 import {AbilityConstant, UIAbility, Want} from '@kit.AbilityKit';
 import {hilog} from '@kit.PerformanceAnalysisKit';
@@ -72,11 +79,15 @@ EOF
     -arp "E:\\program\\zcode-harmony\\entry\\.preview\\default\\intermediates\\res\\default" \
     -hsp "D:\\Huawei\\DevEco Studio\\sdk\\default\\hms\\previewer" -cpm false >/dev/null 2>&1 &)
   sleep 13
-  PID=$(tasklist //FI "IMAGENAME eq Previewer.exe" 2>/dev/null | tail -1 | awk '{print $2}')
-  PORT=$(netstat -ano 2>/dev/null | grep "LISTENING" | grep " $PID" | grep "127.0.0.1" | head -1 | awk '{print $2}' | sed 's/127.0.0.1://')
-  echo "== [$NAME] pid=$PID port=$PORT"
-  node /e/program/zcode-harmony/.preview-grab.js "$PORT" "E:/program/zcode-harmony/docs/preview-${NAME}.jpg"
-  taskkill //PID "$PID" //F >/dev/null 2>&1
+  echo "== [$NAME] grabbing..."
+  # 前台抓帧：脚本内部自动发现引擎端口、收集 8s 帧后自退（引擎先起，无需 wait）
+  if node /e/program/zcode-harmony/tools/preview/wait-and-grab.js \
+    "E:/program/zcode-harmony/docs/preview-${NAME}.jpg" 8000; then
+    echo "== [$NAME] grabbed"
+  else
+    echo "== [$NAME] GRAB-FAIL"
+  fi
+  taskkill //IM Previewer.exe //F >/dev/null 2>&1
   sleep 1
 done
 echo ALL-DONE

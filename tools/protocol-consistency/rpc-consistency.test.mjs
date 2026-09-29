@@ -3,14 +3,14 @@
  * 同一组向量分别喂给 @zcode/rpc 原包（TS 源）与 commons/protocol 移植层，
  * 断言编码结果逐字节一致、解码结果语义一致、分帧行为一致。
  *
- * 原包路径默认 F:/program/zcode/packages/rpc/src，用环境变量 ZCODE_RPC_SRC 覆盖。
+ * 原包路径默认 E:/program/zcode（F: 盘残缺安装已弃用）/packages/rpc/src，用环境变量 ZCODE_RPC_SRC 覆盖。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-const ORIGIN = process.env.ZCODE_RPC_SRC ?? 'F:/program/zcode/packages/rpc/src';
+const ORIGIN = process.env.ZCODE_RPC_SRC ?? 'E:/program/zcode/packages/rpc/src';
 const PORT_DIR = path.resolve(import.meta.dirname, '../../commons/protocol/src/main/ets/rpc');
 
 async function load(dir, file) {
