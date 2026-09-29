@@ -26,6 +26,10 @@ struct Index {
       this.profile = null;
     }
     this.loading = false;
+    // A5：已配对 → 工作台是首页；replace 失败（预览器）停留本页，卡片仍可手动进入。
+    if (this.profile !== null) {
+      router.replaceUrl({ url: 'pages/workbench/SessionList' }).catch(() => {});
+    }
   }
 
   private openPairing(): void {
@@ -68,7 +72,7 @@ struct Index {
             .fontSize(12)
             .fontColor(ZcodeColors.textTertiary())
 
-          Text('已配对 · 会话工作台建设中（A5 批次接入）')
+          Text('已配对 · 正在进入工作台…')
             .fontSize(12)
             .fontColor(ZcodeColors.textTertiary())
         }
