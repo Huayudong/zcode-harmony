@@ -60,9 +60,11 @@ export interface ConversationRowView {
   rowId: number;
   /** turnHeader/userInput/assistantText/reasoning/toolCall/subagent/artifact/hookInvocation/timelineMarker/other。 */
   kind: string;
+  /** 稳定实体 id（turnHeader 作 fileChanges 查询 target 用；空串 = 无）。 */
+  entityId: string;
   /** userInput/assistantText/reasoning 的正文；timelineMarker 的标签。 */
   text: string;
-  /** 行状态（streaming/complete/...；toolCall 为 status 词表）。 */
+  /** 行状态（streaming/complete/...；toolCall/subagent 为 status 词表）。 */
   state: string;
   toolName: string;
   /** 工具入参（单行展示用）。 */
@@ -80,7 +82,39 @@ export interface ConversationRowView {
   artifactType: string;
   /** assistantText.model。 */
   modelName: string;
+  /** turnHeader.fileChanges 聚合（0 = 无）。 */
+  fileAdditions: number;
+  fileDeletions: number;
+  fileCount: number;
   createdAt: number;
+}
+
+/** 只读 diff hunk 视图（OUT-5；行首 +/-/空格 语义由服务端 lines 携带）。 */
+export interface DiffHunkView {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
+/** 单文件变更视图（OUT-5 文件列表行）。 */
+export interface FileChangeItemView {
+  path: string;
+  additions: number;
+  deletions: number;
+  toolNames: string;
+  hunks: DiffHunkView[];
+}
+
+/** 一轮的文件变更报告（v4ConversationFileChangesResult 投影）。 */
+export interface FileChangesReportView {
+  files: number;
+  additions: number;
+  deletions: number;
+  /** active/reverted；空串 = 服务端未标注。 */
+  state: string;
+  items: FileChangeItemView[];
 }
 
 // ── 防御性取值 ──
@@ -255,9 +289,11 @@ export class SessionsIndexModel {
 function rowViewFrom(source: Record<string, unknown>): ConversationRowView {
   const output = child(source, "output");
   const error = child(source, "error");
+  const fileChanges = child(source, "fileChanges");
   return {
     rowId: num(source, "rowId"),
     kind: str(source, "kind"),
+    entityId: str(source, "entityId"),
     text: str(source, "text"),
     // 行状态：多数行叫 state，toolCall/subagent 叫 status——归一到同一视图字段。
     state: str(source, "state") || str(source, "status"),
@@ -271,6 +307,9 @@ function rowViewFrom(source: Record<string, unknown>): ConversationRowView {
     displayName: str(source, "displayName"),
     artifactType: str(source, "artifactType"),
     modelName: str(source, "model"),
+    fileAdditions: num(fileChanges, "additions"),
+    fileDeletions: num(fileChanges, "deletions"),
+    fileCount: num(fileChanges, "files"),
     createdAt: num(source, "createdAt"),
   };
 }
@@ -332,6 +371,58 @@ function pendingFrom(source: Record<string, unknown>): PendingInteractionView {
   return view;
 }
 
+/** v4ConversationFileChangesResult → 报告视图（防御性提取；入参已经原 schema 校验）。 */
+export function parseFileChangesResult(source: unknown): FileChangesReportView {
+  const record = asRecord(source);
+  const items: FileChangeItemView[] = [];
+  for (const item of arr(record, "items")) {
+    const file = asRecord(item);
+    if (file === null) {
+      continue;
+    }
+    const hunks: DiffHunkView[] = [];
+    for (const patch of arr(file, "patches")) {
+      const hunk = asRecord(patch);
+      if (hunk === null) {
+        continue;
+      }
+      const lines: string[] = [];
+      for (const line of arr(hunk, "lines")) {
+        if (typeof line === "string") {
+          lines.push(line);
+        }
+      }
+      hunks.push({
+        oldStart: num(hunk, "oldStart"),
+        oldLines: num(hunk, "oldLines"),
+        newStart: num(hunk, "newStart"),
+        newLines: num(hunk, "newLines"),
+        lines: lines,
+      });
+    }
+    const tools: string[] = [];
+    for (const tool of arr(file, "toolNames")) {
+      if (typeof tool === "string") {
+        tools.push(tool);
+      }
+    }
+    items.push({
+      path: str(file, "path"),
+      additions: num(file, "additions"),
+      deletions: num(file, "deletions"),
+      toolNames: tools.join(" · "),
+      hunks: hunks,
+    });
+  }
+  return {
+    files: num(record, "files"),
+    additions: num(record, "additions"),
+    deletions: num(record, "deletions"),
+    state: str(record, "state"),
+    items: items,
+  };
+}
+
 export class ConversationModel {
   readonly sessionId: string;
   private snapshot: Record<string, unknown> | null = null;
@@ -386,6 +477,16 @@ export class ConversationModel {
       }
     }
     return out;
+  }
+
+  /** 快照 revision（fileChanges 只读查询的 baseRevision）。 */
+  revision(): number {
+    return num(this.snapshot, "revision");
+  }
+
+  /** 快照日志纪元（fileChanges 查询的 baseLogEpoch；空串 = 未就绪）。 */
+  logEpoch(): string {
+    return str(this.snapshot, "logEpoch");
   }
 
   /** 是否有流式中的内容（正文/工具在跑）——停止按钮与「进行中」徽标依据。 */

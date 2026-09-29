@@ -66,7 +66,9 @@ export {
   subscribeParamsSchema,
   subscribeAckSchema,
   sessionsIndexTopicFrameSchema,
-  conversationTopicFrameSchema
+  conversationTopicFrameSchema,
+  v4ConversationFileChangesParamsSchema,
+  v4ConversationFileChangesResultSchema
 } from './src/main/ets/v4/transport';
 export { createTopicWireFrameSchema, topicWireFrameCandidateSchema } from './src/main/ets/v4/wire';
 export {
@@ -107,9 +109,13 @@ export { crc32WireBytes, encodeWireBytesBase64, decodeWireBase64 } from './src/m
 export {
   SessionsIndexModel,
   ConversationModel,
+  parseFileChangesResult,
   type SessionSummaryView,
   type ConversationRowView,
   type PendingInteractionView,
   type PendingInteractionOptionView,
+  type DiffHunkView,
+  type FileChangeItemView,
+  type FileChangesReportView,
   type WorkbenchFrameLike
 } from './src/main/ets/v4/WorkbenchModel';

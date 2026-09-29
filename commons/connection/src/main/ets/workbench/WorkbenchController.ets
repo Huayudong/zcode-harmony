@@ -20,8 +20,10 @@ import {
   ConversationModel,
   Emitter,
   SessionsIndexModel,
+  parseFileChangesResult,
   type ConversationRowView,
   type Event,
+  type FileChangesReportView,
   type PendingInteractionView,
   type SessionSummaryView,
   type V4Fault,
@@ -484,6 +486,21 @@ export class WorkbenchController {
     }
     const payload: ResolveInteractionPayload = { interactionId: interactionId, answer: answer };
     await engine.sendCommand(sessionId, 'resolveInteraction', payload);
+  }
+
+  /** 变更 Tab（OUT-5）：拉取某轮（turnHeader 行）的文件变更报告。 */
+  async loadFileChanges(sessionId: string, turnRowId: number, turnEntityId: string): Promise<FileChangesReportView> {
+    const engine = this.engine;
+    const model = this.conversationModels.get(sessionId);
+    if (engine === null || model === undefined) {
+      throw new Error('未连接');
+    }
+    const baseLogEpoch = model.logEpoch();
+    if (baseLogEpoch.length === 0) {
+      throw new Error('会话快照未就绪');
+    }
+    const raw = await engine.queryFileChanges(sessionId, turnRowId, turnEntityId, model.revision(), baseLogEpoch);
+    return parseFileChangesResult(raw);
   }
 
   // ── 视图事件 ──

@@ -89,6 +89,18 @@ export class ZCodeAgentStub {
     return this.call('conversationRowsRangeV4', params);
   }
 
+  /** 只读查询：某轮（target 行）的文件变更与只读 diff hunks。 */
+  conversationFileChangesV4(
+    params: WorkspaceTarget & {
+      sessionId: string;
+      target: { rowId: number; entityId: string };
+      baseRevision: number;
+      baseLogEpoch: string;
+    },
+  ): Promise<object> {
+    return this.call('conversationFileChangesV4', params);
+  }
+
   sendConversationCommandV4(
     params: WorkspaceTarget & { envelope: object },
   ): Promise<object> {

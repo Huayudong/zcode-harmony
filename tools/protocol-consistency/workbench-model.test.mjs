@@ -12,6 +12,7 @@ const delta = await import(V4.replace('index.js', 'delta.js'));
 const sessionsIndex = await import(V4.replace('index.js', 'sessions-index.js'));
 const snapshotMod = await import(V4.replace('index.js', 'snapshot.js'));
 const commandMod = await import(V4.replace('index.js', 'command.js'));
+const transportMod = await import(V4.replace('index.js', 'transport.js'));
 
 // ── fixtures（先过 schema，保证测的是契约形状而非自造形状）──
 
@@ -282,4 +283,77 @@ test('sendText.mode 信封：build/plan 与缺省过 schema，词表外拒绝', 
   assert.equal(commandMod.parseCommandEnvelope({ ...base, commandId: 'cmd-m3', payload: { text: '你好' } }).ok, true);
   // 词表外（"问答"档尚未映射，Q3 开放中）必须拒绝
   assert.equal(commandMod.parseCommandEnvelope({ ...base, commandId: 'cmd-m4', payload: { text: '你好', mode: 'ask' } }).ok, false);
+});
+
+// ── 6. 变更 Tab（批次10 / OUT-5）：fileChanges 报告投影 + turnHeader 聚合 ──
+test('fileChanges 投影与 turnHeader 聚合、快照水位取值', () => {
+  // 报告 fixture 先过移植的 result schema
+  const result = transportMod.v4ConversationFileChangesResultSchema.parse({
+    files: 2,
+    additions: 12,
+    deletions: 3,
+    state: 'active',
+    items: [
+      {
+        path: 'src/app.ts',
+        additions: 9,
+        deletions: 1,
+        writeCount: 2,
+        toolNames: ['Edit'],
+        patches: [
+          { oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, lines: [' context', '-old', '+new1', '+new2'] },
+        ],
+      },
+      {
+        path: 'README.md',
+        additions: 3,
+        deletions: 2,
+        writeCount: 1,
+        toolNames: ['Write', 'Edit'],
+        patches: [],
+      },
+    ],
+  });
+  const view = workbench.parseFileChangesResult(result);
+  assert.equal(view.files, 2);
+  assert.equal(view.additions, 12);
+  assert.equal(view.deletions, 3);
+  assert.equal(view.state, 'active');
+  assert.equal(view.items.length, 2);
+  assert.equal(view.items[0].path, 'src/app.ts');
+  assert.equal(view.items[0].hunks.length, 1);
+  assert.equal(view.items[0].hunks[0].lines.length, 4);
+  assert.equal(view.items[0].hunks[0].lines[1], '-old');
+  assert.equal(view.items[1].toolNames, 'Write · Edit');
+  assert.equal(view.items[1].hunks.length, 0);
+
+  // turnHeader 聚合与 entityId 进 RowView；快照水位/纪元可取（fileChanges 查询参数）
+  const turnRow = rows.conversationRowSchema.parse({
+    ...rowBase,
+    rowId: 10,
+    kind: 'turnHeader',
+    entityId: 'turn-ent-1',
+    origin: 'userInput',
+    state: 'completedSuccess',
+    startedAt: 1_726_000_000_000,
+    fileChanges: { additions: 12, deletions: 3, files: 2 },
+  });
+  const model = new workbench.ConversationModel('s-1');
+  model.applyFrame({
+    payload: {
+      kind: 'snapshot',
+      snapshot: {
+        rows: { window: [turnRow], totalCount: 1, firstRowId: 10 },
+        logEpoch: 'epoch-1',
+        revision: 7,
+      },
+    },
+  });
+  const rowView = model.rows()[0];
+  assert.equal(rowView.entityId, 'turn-ent-1');
+  assert.equal(rowView.fileCount, 2);
+  assert.equal(rowView.fileAdditions, 12);
+  assert.equal(rowView.fileDeletions, 3);
+  assert.equal(model.revision(), 7);
+  assert.equal(model.logEpoch(), 'epoch-1');
 });
