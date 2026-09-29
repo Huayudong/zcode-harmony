@@ -164,6 +164,10 @@ interface ResolveInteractionPayload {
   answer: ResolveAnswer;
 }
 
+interface RenameSessionPayload {
+  title: string;
+}
+
 /** 缓存装载用的快照载荷形状（与服务端 sessions-index snapshot 同构的最小集）。 */
 interface CachedSessionsSnapshot {
   sessions: object[];
@@ -266,6 +270,16 @@ export class WorkbenchController {
 
   getSessionList(): SessionSummaryView[] {
     return this.sessionsModel.list();
+  }
+
+  /** A9 诊断：待发命令数（断线积压）。 */
+  getPendingCommandCount(): number {
+    return this.engine !== null ? this.engine.pendingCommandCount : 0;
+  }
+
+  /** A9 诊断：活跃订阅水位条数。 */
+  getWatermarkCount(): number {
+    return this.engine !== null ? this.engine.currentWatermarks().length : 0;
   }
 
   // ── 启动链 ──
@@ -843,6 +857,48 @@ export class WorkbenchController {
     }
     const raw = await engine.queryFileChanges(sessionId, turnRowId, turnEntityId, model.revision(), baseLogEpoch);
     return parseFileChangesResult(raw);
+  }
+
+  /** 会话改名（A9 列表重命名；title 走 renameSession 幂等命令，服务端落 meta.title）。 */
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    const payload: RenameSessionPayload = { title: title };
+    await engine.sendCommand(sessionId, 'renameSession', payload);
+  }
+
+  /** A9：按当前活跃档案重建连接链（切换档案/诊断重连共用）。 */
+  async restart(): Promise<void> {
+    if (this.engine !== null) {
+      this.engine.stop();
+      this.engine = null;
+    }
+    this.profile = null;
+    this.workspaceKey = '';
+    this.hasLiveData = false;
+    this.sessionsIndexPending = true;
+    this.startupFailure = null;
+    this.currentState = { state: 'offline', detail: '正在重连' };
+    this.stateEmitter.fire(this.currentState);
+    this.conversationModels.clear();
+    this.attachmentsBySession.clear();
+    await this.initialize();
+  }
+
+  /** A9：清本地缓存（会话列表/对话快照/草稿；不动档案与凭证）。 */
+  async clearLocalCache(): Promise<void> {
+    if (this.cache !== null) {
+      await this.cache.clearAll();
+    }
+    try {
+      const drafts = await preferences.getPreferences(this.context, { name: 'zcode-drafts' });
+      await drafts.clear();
+      await drafts.flush();
+    } catch (error) {
+      hilog.warn(0, 'Workbench', 'draft clear failed: %{public}s', String(error));
+    }
   }
 
   // ── 视图事件 ──

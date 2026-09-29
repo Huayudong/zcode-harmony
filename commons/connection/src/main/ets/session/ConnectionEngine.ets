@@ -59,8 +59,8 @@ interface EngineCommandEnvelope {
   issuedAt: number;
 }
 
-/** v4 命令词表（本批使用面；批次8 扩展 resolveInteraction 批准应答）。 */
-export type CommandType = 'sendText' | 'stop' | 'resolveInteraction';
+/** v4 命令词表（本批使用面；批次14 增 renameSession 会话改名）。 */
+export type CommandType = 'sendText' | 'stop' | 'resolveInteraction' | 'renameSession';
 
 const BACKOFF_SCHEDULE_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
 
