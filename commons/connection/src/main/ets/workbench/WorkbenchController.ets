@@ -213,6 +213,8 @@ export class WorkbenchController {
   private notifySeq = 0;
   private readonly pendingConversations = new Set<string>();
   private readonly conversationFlushTimers = new Map<string, number>();
+  private readonly conversationFireTimers = new Map<string, number>();
+  private readonly pendingConversationFire = new Set<string>();
   private sessionsIndexPending = true;
 
   private currentState: ConnectionStateEvent = { state: 'offline', detail: '尚未连接' };
@@ -530,10 +532,27 @@ export class WorkbenchController {
       const model = this.conversationModels.get(sessionId);
       if (model !== undefined && model.applyFrame(frame)) {
         this.scheduleConversationFlush(sessionId);
-        this.fireConversation(sessionId);
+        // OUT-1 16ms 合帧：一帧一绘，flush 窗口内的连发帧合并为单次视图事件
+        this.fireConversationThrottled(sessionId);
         this.notifyNewInteractions(sessionId, model.pendingInteractions());
       }
     }
+  }
+
+  /** 16ms 前沿+尾沿合帧：首帧立即绘，窗口内的后续帧合并到尾沿一次绘。 */
+  private fireConversationThrottled(sessionId: string): void {
+    if (this.conversationFireTimers.has(sessionId)) {
+      this.pendingConversationFire.add(sessionId);
+      return;
+    }
+    this.fireConversation(sessionId);
+    const timer = setTimeout((): void => {
+      this.conversationFireTimers.delete(sessionId);
+      if (this.pendingConversationFire.delete(sessionId)) {
+        this.fireConversationThrottled(sessionId);
+      }
+    }, 16);
+    this.conversationFireTimers.set(sessionId, timer);
   }
 
   // ── A8 前台本地通知（NTY-1/2 简化 + NTY-4 基础分级；Push 属 M2）──
