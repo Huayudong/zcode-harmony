@@ -272,3 +272,14 @@ test('批准链路：pendingInteractions 投影、state.updated 坍缩、resolve
     payload: { interactionId: 'i-1' },
   }).ok, false);
 });
+
+// ── 5. 输入区模式（批次9 / INP-6）：sendText 按次提交 mode 信封 ──
+test('sendText.mode 信封：build/plan 与缺省过 schema，词表外拒绝', () => {
+  const base = { commandId: 'cmd-m1', clientId: 'client-1', sessionId: 's-1', type: 'sendText', issuedAt: 1_726_000_000_000 };
+  assert.equal(commandMod.parseCommandEnvelope({ ...base, payload: { text: '你好', mode: 'build' } }).ok, true);
+  assert.equal(commandMod.parseCommandEnvelope({ ...base, commandId: 'cmd-m2', payload: { text: '你好', mode: 'plan' } }).ok, true);
+  // 缺 mode = 跟随服务端会话当前模式
+  assert.equal(commandMod.parseCommandEnvelope({ ...base, commandId: 'cmd-m3', payload: { text: '你好' } }).ok, true);
+  // 词表外（"问答"档尚未映射，Q3 开放中）必须拒绝
+  assert.equal(commandMod.parseCommandEnvelope({ ...base, commandId: 'cmd-m4', payload: { text: '你好', mode: 'ask' } }).ok, false);
+});

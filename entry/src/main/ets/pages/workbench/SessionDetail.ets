@@ -1,4 +1,5 @@
 import router from '@ohos.router';
+import preferences from '@ohos.data.preferences';
 import { WorkbenchController, type ConversationUpdate, type ResolveAnswer } from 'connection';
 import type { ConnectionStateEvent } from 'connection';
 import type { ConversationRowView, PendingInteractionView, PendingInteractionOptionView, IDisposable } from 'protocol';
@@ -10,10 +11,14 @@ interface SessionRouteParams {
   title: string;
 }
 
+/** 内置快捷指令（PRD INP-5 的 4 个内置 chips；用户自定义模板 P1）。 */
+const QUICK_CHIPS: string[] = ['继续', '跑测试', '解释这段 diff', '换个思路'];
+
 /**
- * 会话页（A5 渲染管线 + 批次8 OUT-3/4 批准卡片）：行视图 = ConversationModel 投影，
- * 流式 delta 到达即整表重绘；待批交互吸底卡片，按服务端词表应答（interactionId 幂等）。
- * 底部输入面 sendText 走 engine 幂等队列（离线入队、重连自动投递）。
+ * 会话页（A5 渲染管线 + 批次8 OUT-3/4 批准卡片 + 批次9 A6 输入区）：
+ * 行视图 = ConversationModel 投影；待批交互吸底卡片按服务端词表应答；
+ * 输入舱 TextArea 1→6 行 + 聚焦泛光 + 草稿保护 + 模式选择 + 快捷 chips；
+ * 发送/停止同位形变（停止需二次长按防误触），全部命令走 engine 幂等队列。
  */
 @Entry
 @Component
@@ -29,9 +34,13 @@ struct SessionDetail {
   @State pending: PendingInteractionView[] = [];
   @State resolvingId: string = '';
   @State pendingFreeText: string = '';
+  @State inputFocused: boolean = false;
+  @State sendMode: string = 'build';
+  @State stopArmed: boolean = false;
   private controller: WorkbenchController | null = null;
   private sessionId: string = '';
   private disposables: IDisposable[] = [];
+  private draftTimer: number = -1;
 
   aboutToAppear(): void {
     const params = router.getParams() as SessionRouteParams | null;
@@ -50,6 +59,8 @@ struct SessionDetail {
     if (this.controller !== null && this.sessionId.length > 0) {
       void this.controller.closeSession(this.sessionId);
     }
+    // INP-8 草稿保护：离页即存
+    void this.persistDraft();
   }
 
   private async bootstrap(): Promise<void> {
@@ -66,7 +77,6 @@ struct SessionDetail {
       this.rows = update.rows;
       this.hasLiveWork = update.hasLiveWork;
       this.pending = update.pending;
-      // 服务端投影已把该交互移除（CLI 准入完成）→ 解除按钮锁定
       if (this.resolvingId.length > 0
         && update.pending.findIndex((item: PendingInteractionView) => item.interactionId === this.resolvingId) < 0) {
         this.resolvingId = '';
@@ -77,6 +87,48 @@ struct SessionDetail {
     }));
     if (this.sessionId.length > 0) {
       this.rows = await controller.openSession(this.sessionId);
+    }
+    await this.loadDraft();
+  }
+
+  // ── INP-8 草稿保护（按会话持久；切换/重启不丢）──
+
+  private draftKey(): string {
+    return `draft_${this.sessionId}`;
+  }
+
+  private async loadDraft(): Promise<void> {
+    try {
+      const prefs = await preferences.getPreferences(getContext(this), { name: 'zcode-drafts' });
+      const saved = await prefs.get(this.draftKey(), '') as string;
+      if (this.inputText.length === 0 && saved.length > 0) {
+        this.inputText = saved;
+      }
+    } catch (error) {
+      // 预览器等环境无草稿不阻塞
+    }
+  }
+
+  private scheduleDraftSave(): void {
+    if (this.draftTimer >= 0) {
+      clearTimeout(this.draftTimer);
+    }
+    this.draftTimer = setTimeout((): void => {
+      this.draftTimer = -1;
+      void this.persistDraft();
+    }, 500);
+  }
+
+  private async persistDraft(): Promise<void> {
+    if (this.sessionId.length === 0) {
+      return;
+    }
+    try {
+      const prefs = await preferences.getPreferences(getContext(this), { name: 'zcode-drafts' });
+      await prefs.put(this.draftKey(), this.inputText);
+      await prefs.flush();
+    } catch (error) {
+      // 同上
     }
   }
 
@@ -124,8 +176,10 @@ struct SessionDetail {
     this.sending = true;
     this.sendHint = '';
     try {
-      await this.controller.sendText(this.sessionId, text);
+      await this.controller.sendText(this.sessionId, text, this.sendMode);
       this.inputText = '';
+      this.stopArmed = false;
+      void this.persistDraft();
       if (this.stateEvent.state !== 'online') {
         this.sendHint = '当前离线：已入队，重连后自动发送';
       }
@@ -139,11 +193,28 @@ struct SessionDetail {
     if (this.controller === null || this.sessionId.length === 0) {
       return;
     }
+    this.stopArmed = false;
     try {
       await this.controller.stopSession(this.sessionId);
     } catch (error) {
       this.sendHint = `停止失败：${error instanceof Error ? error.message : String(error)}`;
     }
+  }
+
+  /** INP-7：停止需二次长按（防误触）；第一次长按进入待确认态，超时自动解除。 */
+  private armStop(): void {
+    if (this.stopArmed) {
+      void this.stop();
+      return;
+    }
+    this.stopArmed = true;
+    this.sendHint = '再长按一次确认停止';
+    setTimeout((): void => {
+      if (this.stopArmed) {
+        this.stopArmed = false;
+        this.sendHint = '';
+      }
+    }, 2500);
   }
 
   /** 批准/应答（OUT-4）：interactionId 幂等，竞态以 CLI 准入为准。 */
@@ -181,6 +252,19 @@ struct SessionDetail {
 
   private secondsOf(ms: number): string {
     return ms > 0 ? `${Math.max(1, Math.round(ms / 1000))}s` : '';
+  }
+
+  @Builder
+  ModeChip(label: string, value: string) {
+    Text(label)
+      .fontSize(12)
+      .fontColor(this.sendMode === value ? '#FFFFFF' : ZcodeColors.textSecondary())
+      .backgroundColor(this.sendMode === value ? ZcodeColors.BRAND : Color.Transparent)
+      .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+      .borderRadius(999)
+      .onClick(() => {
+        this.sendMode = value;
+      })
   }
 
   @Builder
@@ -485,7 +569,7 @@ struct SessionDetail {
       .width('100%')
       .padding({ left: 16, right: 16 })
 
-      // 发送提示 / 输入面
+      // 发送提示
       if (this.sendHint.length > 0) {
         Text(this.sendHint)
           .fontSize(11)
@@ -494,46 +578,120 @@ struct SessionDetail {
           .textAlign(TextAlign.Center)
           .padding(3)
       }
+
+      // INP-5：快捷指令 chips（横滑）
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(QUICK_CHIPS, (chip: string) => {
+            Text(chip)
+              .fontSize(12)
+              .fontColor(ZcodeColors.textSecondary())
+              .backgroundColor(ZcodeColors.SURFACE)
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(999)
+              .onClick(() => {
+                this.inputText = this.inputText.length > 0 ? `${this.inputText} ${chip}` : chip;
+                this.scheduleDraftSave();
+              })
+          }, (chip: string) => chip)
+        }
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 6 })
+      .scrollBar(BarState.Off)
+
+      // INP-1/6/7：输入舱（胶囊容器 + 模式选择 + 发送/停止同位形变）
       Row({ space: 10 }) {
-        TextInput({
-          text: this.inputText,
-          placeholder: this.stateEvent.state === 'online' ? '给 Agent 发消息…' : '离线中，消息将排队…',
-        })
-          .fontSize(14)
-          .fontColor(ZcodeColors.textPrimary())
-          .placeholderColor(ZcodeColors.textTertiary())
-          .backgroundColor(ZcodeColors.SURFACE)
-          .borderRadius(12)
-          .layoutWeight(1)
-          .onChange((value: string) => {
-            this.inputText = value;
+        Column({ space: 6 }) {
+          TextArea({
+            text: this.inputText,
+            placeholder: this.stateEvent.state === 'online' ? '给 Agent 发消息…' : '离线中，消息将排队…',
           })
+            .fontSize(14)
+            .fontColor(ZcodeColors.textPrimary())
+            .placeholderColor(ZcodeColors.textTertiary())
+            .backgroundColor(Color.Transparent)
+            .constraintSize({ maxHeight: 156 })
+            .padding({ left: 4, right: 4 })
+            .onFocus(() => {
+              this.inputFocused = true;
+            })
+            .onBlur(() => {
+              this.inputFocused = false;
+            })
+            .onChange((value: string) => {
+              this.inputText = value;
+              this.scheduleDraftSave();
+            })
+
+          Row({ space: 6 }) {
+            Text('模式')
+              .fontSize(10)
+              .fontColor(ZcodeColors.textTertiary())
+            this.ModeChip('Agent', 'build')
+            this.ModeChip('Plan', 'plan')
+            Blank()
+            if (this.inputFocused) {
+              Text('')
+                .fontSize(1)
+            }
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+        }
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .borderRadius(20)
+        .backgroundColor(ZcodeColors.SURFACE)
+        .border({
+          width: this.inputFocused ? 1.5 : 0,
+          color: ZcodeColors.BRAND,
+        })
+        .layoutWeight(1)
+        // INP-1：聚焦时边缘泛品牌色光
+        .shadow(this.inputFocused ? {
+          radius: 18,
+          color: 'rgba76, 125, 255, 0.35',
+          offsetX: 0,
+          offsetY: 0,
+        } : {
+          radius: 0,
+          color: Color.Transparent,
+          offsetX: 0,
+          offsetY: 0,
+        })
+
         if (this.hasLiveWork) {
-          Button('⏹')
-            .fontSize(16)
+          // INP-7：生成中 → 停止（destructive 描边，二次长按防误触）
+          Button(this.stopArmed ? '停止?' : '⏹')
+            .fontSize(this.stopArmed ? 12 : 16)
             .fontColor(ZcodeColors.DESTRUCTIVE)
-            .backgroundColor(ZcodeColors.SURFACE)
-            .width(44)
-            .height(44)
-            .borderRadius(12)
+            .backgroundColor(Color.Transparent)
+            .border({ width: 1.5, color: ZcodeColors.DESTRUCTIVE })
+            .width(48)
+            .height(48)
+            .borderRadius(24)
+            .animation({ duration: 800, curve: Curve.EaseInOut })
+            .gesture(LongPressGesture({ repeat: false, duration: 500 }).onAction(() => {
+              this.armStop();
+            }))
+        } else {
+          Button(this.sending ? '…' : '↑')
+            .fontSize(20)
+            .fontColor(this.inputText.trim().length > 0 && !this.sending ? '#FFFFFF' : ZcodeColors.textTertiary())
+            .backgroundColor(this.inputText.trim().length > 0 && !this.sending ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
+            .width(48)
+            .height(48)
+            .borderRadius(24)
+            .animation({ duration: 300, curve: Curve.EaseOut })
             .onClick(() => {
-              void this.stop();
+              void this.send();
             })
         }
-        Button(this.sending ? '…' : '发送')
-          .fontSize(14)
-          .fontColor(this.inputText.trim().length > 0 && !this.sending ? '#FFFFFF' : ZcodeColors.textTertiary())
-          .backgroundColor(this.inputText.trim().length > 0 && !this.sending ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
-          .height(44)
-          .padding({ left: 18, right: 18 })
-          .borderRadius(12)
-          .onClick(() => {
-            void this.send();
-          })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 16 })
-      .alignItems(VerticalAlign.Center)
+      .padding({ left: 16, right: 16, top: 6, bottom: 16 })
+      .alignItems(VerticalAlign.Bottom)
     }
     .width('100%')
     .height('100%')
