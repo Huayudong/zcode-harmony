@@ -15,6 +15,7 @@ import preferences from '@ohos.data.preferences';
 import fs from '@ohos.file.fs';
 import util from '@ohos.util';
 import common from '@ohos.app.ability.common';
+import notificationManager from '@ohos.notificationManager';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import {
@@ -49,6 +50,7 @@ const TAG: string = 'Workbench';
 const APP_VERSION: string = '0.1.0';
 const PREFS_NAME: string = 'zcode-workbench';
 const KEY_CLIENT_ID: string = 'clientId';
+const KEY_NOTIFY_LEVEL: string = 'notifyLevel';
 /** 会话快照缓存写穿的去抖窗口（流式期间高频 delta 不逐条落盘）。 */
 const CONVERSATION_FLUSH_DEBOUNCE_MS: number = 1500;
 
@@ -154,6 +156,9 @@ export interface WorkspaceFileView {
   type: string;
 }
 
+/** 本地通知分级（NTY-4 基础档；M1 前台长连接驱动，Push 属 M2）。 */
+export type NotificationLevel = 'approval-only' | 'all' | 'off';
+
 interface ResolveInteractionPayload {
   interactionId: string;
   answer: ResolveAnswer;
@@ -197,6 +202,11 @@ export class WorkbenchController {
   private readonly sessionsModel = new SessionsIndexModel();
   private readonly conversationModels = new Map<string, ConversationModel>();
   private readonly attachmentsBySession = new Map<string, AttachmentItem[]>();
+  private readonly notifiedInteractions = new Set<string>();
+  private readonly lastPhaseBySession = new Map<string, string>();
+  private workbenchPrefs: preferences.Preferences | null = null;
+  private notifyLevel: NotificationLevel = 'approval-only';
+  private notifySeq = 0;
   private readonly pendingConversations = new Set<string>();
   private readonly conversationFlushTimers = new Map<string, number>();
   private sessionsIndexPending = true;
@@ -353,6 +363,8 @@ export class WorkbenchController {
         await prefs.put(KEY_CLIENT_ID, clientId);
         await prefs.flush();
       }
+      this.workbenchPrefs = prefs;
+      this.notifyLevel = await prefs.get(KEY_NOTIFY_LEVEL, 'approval-only') as NotificationLevel;
     } catch (error) {
       clientId = util.generateRandomUUID();
     }
@@ -495,6 +507,7 @@ export class WorkbenchController {
           void this.cache.saveSessions(this.workspaceKey, this.sessionsModel.toJSON());
         }
         this.fireSessions();
+        this.notifyPhaseTransitions();
       }
       return;
     }
@@ -504,7 +517,99 @@ export class WorkbenchController {
       if (model !== undefined && model.applyFrame(frame)) {
         this.scheduleConversationFlush(sessionId);
         this.fireConversation(sessionId);
+        this.notifyNewInteractions(sessionId, model.pendingInteractions());
       }
+    }
+  }
+
+  // ── A8 前台本地通知（NTY-1/2 简化 + NTY-4 基础分级；Push 属 M2）──
+
+  getNotificationLevel(): NotificationLevel {
+    return this.notifyLevel;
+  }
+
+  async setNotificationLevel(level: NotificationLevel): Promise<void> {
+    this.notifyLevel = level;
+    if (this.workbenchPrefs !== null) {
+      try {
+        await this.workbenchPrefs.put(KEY_NOTIFY_LEVEL, level);
+        await this.workbenchPrefs.flush();
+      } catch (error) {
+        hilog.warn(0, 'Workbench', 'notify level persist failed: %{public}s', String(error));
+      }
+    }
+  }
+
+  /** 新出现的待批/待答交互 → 按分级发本地通知（每个 interactionId 只发一次）。 */
+  private notifyNewInteractions(sessionId: string, pending: PendingInteractionView[]): void {
+    if (this.notifyLevel === 'off' || pending.length === 0) {
+      return;
+    }
+    for (const item of pending) {
+      if (this.notifiedInteractions.has(item.interactionId)) {
+        continue;
+      }
+      this.notifiedInteractions.add(item.interactionId);
+      const isPermission = item.kind === 'permission';
+      if (this.notifyLevel === 'approval-only' && !isPermission) {
+        continue;
+      }
+      const action = isPermission ? '等待你的批准' : '等待你的输入';
+      void this.publishNotification(action, `${this.sessionTitleOf(sessionId)}：${item.title}`);
+    }
+  }
+
+  /** 会话阶段迁移到终态 → 'all' 分级下通知完成/出错（首个快照不补发历史）。 */
+  private notifyPhaseTransitions(): void {
+    if (this.notifyLevel !== 'all') {
+      return;
+    }
+    for (const summary of this.sessionsModel.list()) {
+      const prev = this.lastPhaseBySession.get(summary.sessionId);
+      this.lastPhaseBySession.set(summary.sessionId, summary.phase);
+      if (prev === undefined || prev === summary.phase) {
+        continue;
+      }
+      if (summary.phase === 'completedSuccess') {
+        void this.publishNotification('任务完成', this.sessionTitleOf(summary.sessionId));
+      } else if (summary.phase === 'error') {
+        void this.publishNotification('任务出错', this.sessionTitleOf(summary.sessionId));
+      } else if (summary.phase === 'completedInterrupted') {
+        void this.publishNotification('任务已中断', this.sessionTitleOf(summary.sessionId));
+      }
+    }
+  }
+
+  private sessionTitleOf(sessionId: string): string {
+    const summary = this.sessionsModel.summaryOf(sessionId);
+    if (summary !== null && summary.title.length > 0) {
+      return summary.title;
+    }
+    const model = this.conversationModels.get(sessionId);
+    if (model !== undefined && model.title().length > 0) {
+      return model.title();
+    }
+    return '会话';
+  }
+
+  private async publishNotification(title: string, text: string): Promise<void> {
+    try {
+      this.notifySeq += 1;
+      const request: notificationManager.NotificationRequest = {
+        id: this.notifySeq,
+        content: {
+          notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+          normal: {
+            title: title,
+            text: text.length > 0 ? text : 'ZCode',
+            additionalText: '',
+          },
+        },
+      };
+      await notificationManager.publish(request);
+    } catch (error) {
+      // 通知未授权等场景静默（用户可在系统设置开启；直达卡片属 M2 Push 批）
+      hilog.warn(0, 'Workbench', 'notify publish failed: %{public}s', String(error));
     }
   }
 

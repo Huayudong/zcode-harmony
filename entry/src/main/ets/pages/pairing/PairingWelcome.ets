@@ -1,10 +1,12 @@
 import router from '@ohos.router';
-import type { PairRouteParams } from 'connection';
+import { promptAction } from '@kit.ArkUI';
+import { scanBarcode, scanCore } from '@kit.ScanKit';
+import { isPairLink, type PairRouteParams } from 'connection';
 import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
 
 /**
- * 配对欢迎页（ONB-1）：一屏讲清价值，进入手动导入。
- * 相机扫码（ONB-2，Scan Kit）待真机联调批次启用，本批深链/粘贴入口已可用。
+ * 配对欢迎页（ONB-1/2）：扫码（Scan Kit 系统扫码页，无需自管相机权限）为首选，
+ * 深链/手动导入为兜底；非局域网场景给组网指引页（CONN-4）。
  */
 @Entry
 @Component
@@ -15,6 +17,37 @@ struct PairingWelcome {
       url: 'pages/pairing/PairingCodeInput',
       params: params
     }).catch(() => {});
+  }
+
+  private startScan(): void {
+    const context = getContext(this);
+    const options: scanBarcode.ScanOptions = {
+      scanTypes: [scanCore.ScanType.QR_CODE],
+    };
+    scanBarcode.startScanForResult(context, options)
+      .then((result: scanBarcode.ScanResult) => {
+        const link = result.originalValue ?? '';
+        if (!isPairLink(link)) {
+          promptAction.showToast({ message: '二维码不是 ZCode 配对码' });
+          return;
+        }
+        const params: PairRouteParams = { link: link };
+        router.pushUrl({
+          url: 'pages/pairing/PairingCodeInput',
+          params: params
+        }).catch(() => {});
+      })
+      .catch((error: Object) => {
+        // 用户取消/相机不可用：静默或轻提示（取消错误码 1001 常见）
+        const message = String((error as Error).message ?? error);
+        if (!message.includes('1001')) {
+          promptAction.showToast({ message: `扫码不可用：${message}` });
+        }
+      });
+  }
+
+  private openNetworkGuide(): void {
+    router.pushUrl({ url: 'pages/pairing/NetworkGuide' }).catch(() => {});
   }
 
   build() {
@@ -45,8 +78,8 @@ struct PairingWelcome {
 
       Column({ space: 12 }) {
         Row({ space: 8 }) {
-          StatusDot({ tone: StatusTone.PendingConfirm, dotSize: 10 })
-          Text('相机扫码即将可用 · 现在可粘贴链接或手动填写')
+          StatusDot({ tone: StatusTone.Success, dotSize: 10 })
+          Text('推荐扫码配对 · 也可粘贴链接或手动填写')
             .fontSize(12)
             .fontColor(ZcodeColors.textTertiary())
         }
@@ -61,8 +94,8 @@ struct PairingWelcome {
         LightBloomButton({
           label: '扫码配对',
           destructive: false,
-          isEnabled: false,
           onAction: () => {
+            this.startScan();
           }
         })
 
@@ -77,10 +110,19 @@ struct PairingWelcome {
 
       Blank()
 
-      Text('需要电脑与手机处于同一网络')
-        .fontSize(11)
-        .fontColor(ZcodeColors.textTertiary())
-        .margin({ bottom: 24 })
+      Column({ space: 8 }) {
+        Text('需要电脑与手机处于同一网络；跨网络可用 Tailscale/FRP 组网')
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+          .textAlign(TextAlign.Center)
+        Text('无法直连？查看组网指引')
+          .fontSize(12)
+          .fontColor(ZcodeColors.BRAND_LIGHT)
+          .onClick(() => {
+            this.openNetworkGuide();
+          })
+          .margin({ bottom: 24 })
+      }
     }
     .width('100%')
     .height('100%')
