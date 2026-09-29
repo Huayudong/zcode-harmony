@@ -16,6 +16,8 @@ import fs from '@ohos.file.fs';
 import util from '@ohos.util';
 import common from '@ohos.app.ability.common';
 import notificationManager from '@ohos.notificationManager';
+import vibrator from '@ohos.vibrator';
+import { wantAgent } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { PerfMarks } from 'utils';
@@ -590,8 +592,16 @@ export class WorkbenchController {
       if (this.notifyLevel === 'approval-only' && !isPermission) {
         continue;
       }
+      if (isPermission) {
+        // OUT-3：需批准的卡片伴随触感振动（PRD 4.3.3）
+        try {
+          vibrator.vibrate(80);
+        } catch (error) {
+          // 无马达/权限场景静默
+        }
+      }
       const action = isPermission ? '等待你的批准' : '等待你的输入';
-      void this.publishNotification(action, `${this.sessionTitleOf(sessionId)}：${item.title}`);
+      void this.publishNotification(action, `${this.sessionTitleOf(sessionId)}：${item.title}`, sessionId);
     }
   }
 
@@ -628,7 +638,7 @@ export class WorkbenchController {
     return '会话';
   }
 
-  private async publishNotification(title: string, text: string): Promise<void> {
+  private async publishNotification(title: string, text: string, sessionId?: string): Promise<void> {
     try {
       this.notifySeq += 1;
       const request: notificationManager.NotificationRequest = {
@@ -642,6 +652,18 @@ export class WorkbenchController {
           },
         },
       };
+      if (sessionId !== undefined && sessionId.length > 0) {
+        // 点击直达会话页（EntryAbility 按 want.parameters.sessionId 路由）
+        const info: wantAgent.WantAgentInfo = {
+          wants: [{
+            bundleName: this.context.applicationInfo.name,
+            abilityName: 'EntryAbility',
+            parameters: { sessionId: sessionId },
+          }],
+          requestCode: 0,
+        };
+        request.wantAgent = await wantAgent.getWantAgent(info);
+      }
       await notificationManager.publish(request);
     } catch (error) {
       // 通知未授权等场景静默（用户可在系统设置开启；直达卡片属 M2 Push 批）
