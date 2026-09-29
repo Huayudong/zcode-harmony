@@ -647,6 +647,16 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 22/22 + 构建 | connection 增 utils 依赖；**ohpm 自身缓存文件被驱动加密致 install 崩溃**（JSON 首字符 '%'）→ 手工 oh_modules junction 补链绕过（重装 ohpm 缓存或白名单后恢复） |
 | 真机批入口 | — | 设备就绪后：`bash tools/device-readiness.sh` → 按 `docs/scene-checklist.md` 执行，hilog 过滤 PerfMarks 即 6.3 实测 |
 
+### Batch 18（2026-09-29）：A8/M1 简化项收尾——通知直达 / 批准触感 / 修改后重发（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| NTY-1 点击直达 | ✅ | publishNotification 增 wantAgent（bundleName=applicationInfo.name、want.parameters.sessionId）；EntryAbility onCreate/onNewWant 提取并路由 SessionDetail——点击通知拉起 App 直达对应会话 |
+| OUT-3 触感 | ✅ | 新批准类交互 vibrator.vibrate(80)（VIBRATE 权限批次4已有；无马达/权限静默） |
+| OUT-7 完整 | ✅ | 失败卡片「修改后重发」= 回填最近用户输入至输入框（可编辑后发送），与「重发上一条」并列；lastUserInputText 复用 |
+| 门禁 | ✅ 22/22 + 构建 | 加密驱动复发被 if 守卫**成功拦截**（3 文件命中 → 中止 → stdin 修复 → 干净提交 94dded4）——批次15/16 事故的教训已生效 |
+| 真机批遗留 | — | 通知点击路由、触感实际体验、OUT-1 TaskPool 性能基线（需设备） |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
