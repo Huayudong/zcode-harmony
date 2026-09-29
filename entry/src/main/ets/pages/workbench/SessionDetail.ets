@@ -80,7 +80,11 @@ struct SessionDetail {
   @State atHint: string = '';
   @State atPrefix: string = '';
   @State atPosition: number = -1;
+  @State atBottom: boolean = true;
+  @State timelineExpanded: boolean = false;
+  @State timeline: ConversationRowView[] = [];
   private atSearchTimer: number = -1;
+  private listScroller: Scroller = new Scroller();
   private controller: WorkbenchController | null = null;
   private sessionId: string = '';
   private disposables: IDisposable[] = [];
@@ -129,6 +133,12 @@ struct SessionDetail {
         this.sessionTitle = update.title;
       }
       this.refreshTurns();
+      this.refreshTimeline();
+      if (this.atBottom && this.activeTab === 0) {
+        setTimeout((): void => {
+          this.listScroller.scrollEdge(Edge.Bottom);
+        }, 50);
+      }
     }));
     this.disposables.push(controller.onAttachmentChanged((update: AttachmentUpdate) => {
       if (update.sessionId === this.sessionId) {
@@ -139,7 +149,42 @@ struct SessionDetail {
       this.rows = await controller.openSession(this.sessionId);
     }
     this.refreshTurns();
+    this.refreshTimeline();
     await this.loadDraft();
+  }
+
+  /** OUT-6 简版时间线：当前轮（最后一个 turnHeader 之后）的执行步骤。 */
+  private refreshTimeline(): void {
+    const steps: ConversationRowView[] = [];
+    let turnStart = -1;
+    for (const row of this.rows) {
+      if (row.kind === 'turnHeader') {
+        turnStart = row.rowId;
+      }
+    }
+    for (const row of this.rows) {
+      if (turnStart >= 0 && row.rowId > turnStart
+        && (row.kind === 'toolCall' || row.kind === 'subagent')) {
+        steps.push(row);
+      }
+    }
+    this.timeline = steps;
+  }
+
+  /** OUT-7：失败回复的重发动作 = 把最近一条用户输入原文重发（新 commandId，服务端幂等）。 */
+  private resendLastInput(): void {
+    let lastUserInput = '';
+    for (const row of this.rows) {
+      if (row.kind === 'userInput' && row.text.length > 0) {
+        lastUserInput = row.text;
+      }
+    }
+    if (lastUserInput.length === 0) {
+      this.sendHint = '没有可重发的输入';
+      return;
+    }
+    this.inputText = lastUserInput;
+    void this.send();
   }
 
   /** 有文件变更聚合的轮次（turnHeader.fileCount>0），保持选中、默认最新。 */
@@ -974,14 +1019,22 @@ struct SessionDetail {
           }
         }, (seg: TextSegment, idx: number) => `${idx}-${seg.isCode}-${seg.content.length}`)
         if (row.state === 'failed') {
-          // OUT-7：失败回复卡片化（重试动作留待后续批次）
-          Text('回复生成失败，可重发消息重试')
-            .fontSize(12)
-            .fontColor(ZcodeColors.DESTRUCTIVE)
-            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-            .borderRadius(10)
-            .border({ width: 1, color: ZcodeColors.DESTRUCTIVE })
-            .margin({ top: 4 })
+          // OUT-7：失败回复卡片化 + 重发动作（原文重发，服务端按幂等/上下文处理）
+          Row({ space: 10 }) {
+            Text('回复生成失败')
+              .fontSize(12)
+              .fontColor(ZcodeColors.DESTRUCTIVE)
+            Text('重发上一条')
+              .fontSize(12)
+              .fontColor(ZcodeColors.BRAND_LIGHT)
+              .onClick(() => {
+                this.resendLastInput();
+              })
+          }
+          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .borderRadius(10)
+          .border({ width: 1, color: ZcodeColors.DESTRUCTIVE })
+          .margin({ top: 4 })
         }
         if (this.actionsRowId === row.rowId) {
           this.MsgActions(row)
@@ -1330,8 +1383,63 @@ struct SessionDetail {
             .padding(4)
         }
 
-        // 对话行
-        List({ space: 0 }) {
+      // OUT-6：当前轮时间线（可折叠，仅对话 Tab）
+      if (this.activeTab === 0 && this.timeline.length > 0) {
+        Column({ space: 4 }) {
+          Row({ space: 8 }) {
+            StatusDot({ tone: this.hasLiveWork ? StatusTone.Running : StatusTone.Success, dotSize: 8 })
+            Text(`任务步骤 · ${this.timeline.length}`)
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(ZcodeColors.textPrimary())
+            if (this.timeline.length > 0) {
+              Text(`最新: ${this.timeline[this.timeline.length - 1].kind === 'toolCall' ? this.timeline[this.timeline.length - 1].toolName : '子代理'}`)
+                .fontSize(10)
+                .fontColor(ZcodeColors.textTertiary())
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+            }
+            Text(this.timelineExpanded ? '收起' : '展开')
+              .fontSize(11)
+              .fontColor(ZcodeColors.BRAND_LIGHT)
+              .onClick(() => {
+                this.timelineExpanded = !this.timelineExpanded;
+              })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+
+          if (this.timelineExpanded) {
+            ForEach(this.timeline, (step: ConversationRowView, index: number) => {
+              Row({ space: 8 }) {
+                Text(`${index + 1}`)
+                  .fontSize(10)
+                  .fontColor(ZcodeColors.textTertiary())
+                  .width(18)
+                StatusDot({ tone: this.toolTone(step.state), dotSize: 7 })
+                Text(step.kind === 'toolCall' ? step.toolName : `子代理·${step.subagentType}`)
+                  .fontSize(11)
+                  .fontColor(ZcodeColors.textSecondary())
+                if (step.errorMessage.length > 0) {
+                  Text('失败')
+                    .fontSize(10)
+                    .fontColor(ZcodeColors.DESTRUCTIVE)
+                }
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+              .padding({ left: 6, top: 2, bottom: 2 })
+            }, (step: ConversationRowView) => `${step.rowId}-${step.state}`)
+          }
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 4, bottom: 4 })
+        .margin({ bottom: 2 })
+      }
+
+      // 对话行
+      List({ space: 0, scroller: this.listScroller }) {
           ForEach(this.rows, (row: ConversationRowView) => {
             ListItem() {
               this.RowView(row)
@@ -1342,6 +1450,30 @@ struct SessionDetail {
         .layoutWeight(1)
         .padding({ left: 16, right: 16, top: 4 })
         .scrollBar(BarState.Off)
+        .onReachEnd(() => {
+          this.atBottom = true;
+        })
+        .onScrollIndex((start: number, end: number) => {
+          if (this.rows.length > 2 && end < this.rows.length - 2) {
+            this.atBottom = false;
+          }
+        })
+
+        // OUT-1：上滑阅读历史时的「回到底部」浮标
+        if (!this.atBottom) {
+          Text('↓ 回到底部')
+            .fontSize(12)
+            .fontColor('#FFFFFF')
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(999)
+            .backgroundColor(ZcodeColors.BRAND)
+            .shadow({ radius: 12, color: 'rgba(76, 125, 255, 0.45)', offsetX: 0, offsetY: 2 })
+            .margin({ bottom: 6 })
+            .onClick(() => {
+              this.atBottom = true;
+              this.listScroller.scrollEdge(Edge.Bottom);
+            })
+        }
 
         // OUT-3/4：吸底待批卡片
         Column() {
