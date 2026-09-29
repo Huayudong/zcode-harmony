@@ -616,6 +616,17 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | OUT-7 | ✅ 部分 | failed 回复卡片「重发上一条」（最近 userInput 原文重发，新 commandId 幂等队列） |
 | 门禁 | ✅ 19/19 + 构建 | spec：鸿蒙仓 `docs/specs/a7-closing.md`；OUT-1 增量 markdown AST/16ms 合帧/TaskPool 待真机性能批 |
 
+### Batch 15（2026-09-29）：OUT-1 增量渲染——离线可开发部分（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 解析结构 | ✅ | `commons/utils/markdown/MarkdownBlocks.ts` 纯函数解析器：块级 paragraph/heading/list/quote/code + 行内 bold/code span；**增量语义 = 流式尾部追加只改尾部块，前缀块形状稳定**；mdBlockKey 把形状+内容长度编成 ForEach key（组件复用不重建）；TaskPool 就绪（纯函数可直接投递，切换点待真机 Profiler 基线） |
+| 渲染改造 | ✅ | SessionDetail assistantText：splitCodeBlocks → 分块 builder（标题层级字号/列表符与序号/引用左标线/行内 Span/代码块未闭合「·输出中」暂态标注）；失败态降灰保留 |
+| 16ms 合帧 | ✅ | fireConversationThrottled 前沿+尾沿节流（flush 窗口连发合并为 16ms 一次视图事件）；缓存写穿/通知检测/水位记账不受节流影响 |
+| 门禁 | ✅ 22/22 + 构建 | 新增 markdown-blocks.test.mjs 3 组：**增量语义（前缀块 deep-equal + key 稳定、尾部块 key 变化）为门禁断言**；spec：鸿蒙仓 `docs/specs/out1-incremental.md` |
+| 环境偏差 | ⚠️ | 加密驱动第三次复发且首次带病推送（`; `命令链绕过守卫——Index.ets 密文入 1f4cc47 并推远）→ stdin 根治 + amend + force-with-lease 修正为 7f8dc30；教训：扫描命中必须中止整条命令链 |
+| 真机批遗留 | — | TaskPool 投递切换、AST 帧间 diff、16ms 实测帧率（6.3 表）——需 Profiler 基线 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
