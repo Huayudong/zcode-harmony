@@ -578,6 +578,17 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 19/19 + 构建 | fixture 过移植 result schema → 投影断言；spec：鸿蒙仓 `docs/specs/a7-changes.md` |
 | 范围外 | — | 全屏 diff 查看器、OUT-1 增量管线、产物 Tab、OUT-7 重试动作、OUT-6 时间线 |
 
+### Batch 11（2026-09-29）：L3 桩扩展——附件（INP-3）+ @ 引用（INP-4）（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 上传通道 | ✅ | zcode-agent 通道 attachmentBegin/Chunk/Commit/AbortV4（schema 批次6已移植，**零新协议面**）；AgentV4Client 透传：connectionId 自动取 hello、begin/chunk/commit 结果过 schema；20MiB/64 块/512KiB 上限以 PROTOCOL_V4_LIMITS 为准 |
+| 上传编排 | ✅ | Controller.attachFile：begin（uploadId=UUID + sha256=cryptoFramework 增量）→ 顺序 chunk（nextChunkIndex 以服务端 ACK 为准）→ commit 换 ref；失败尽力 abort（TTL 5min 兜底）；进度整表事件（AttachmentUpdate）；只有 ready+ref 非空才随 sendText.attachments 提交 |
+| @ 引用通道 | ✅ | WorkspaceFileStub（file 通道 searchWorkspaceFiles，/ws 全服务暴露）；Controller.searchWorkspaceFiles 投影（≤30 条：name/relativePath/type） |
+| UI | ✅ | 📷相册（PhotoViewPicker）/📄文件（DocumentViewPicker）多选 → 全量读入（20MiB 读取即拦）；上传 chips（进度 n/N、失败红框、✕ 移除先 abort）；@ 面板（主输入 '@' 尾触发、前缀锚点防错插、300ms 去抖搜索）；mention 标准转译 `[basename](relativePath)`（目录补尾斜杠，与桌面 fileMentionProvider 同格式） |
+| 门禁 | ✅ 19/19 + 构建 | 端到端/版本锁覆盖新桩接线；spec：鸿蒙仓 `docs/specs/a6-attachments.md` |
+| 范围外 | — | 拍照直拍（CameraKit 待真机）、图片缩略图、断点续传/并发上传、mention 目录归一化完整规则、@ 面板会话/模式分组 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
