@@ -15,6 +15,9 @@ import {
   sessionsIndexTopicFrameSchema,
   conversationTopicFrameSchema,
   v4ConversationFileChangesResultSchema,
+  v4AttachmentBeginResultSchema,
+  v4AttachmentChunkResultSchema,
+  v4AttachmentCommitResultSchema,
   type HelloMessage,
   type SessionsIndexTopicFrame,
   type ConversationTopicFrame,
@@ -23,10 +26,18 @@ import { V4_WIRE_PROTOCOL_VERSION } from './core.js';
 import { TopicWireFrameAssembler, type TopicWireAssemblyEvent } from './wire-assembler.js';
 import type { TopicWireFrameCandidate } from './wire.js';
 import { commandAckSchema, commandEnvelopeSchema, type CommandAck, type CommandEnvelope } from './command.js';
-import { ZCodeAgentStub, ZCODE_AGENT_CHANNEL, type SubscribeBase, type WorkspaceTarget } from './AgentV4Stub.js';
+import {
+  ZCodeAgentStub,
+  ZCODE_AGENT_CHANNEL,
+  FILE_CHANNEL,
+  WorkspaceFileStub,
+  type SubscribeBase,
+  type WorkspaceTarget,
+} from './AgentV4Stub.js';
 
 export { ZCODE_AGENT_CHANNEL } from './AgentV4Stub.js';
-export type { WorkspaceTarget, SubscribeBase } from './AgentV4Stub.js';
+export { FILE_CHANNEL, WorkspaceFileStub } from './AgentV4Stub.js';
+export type { WorkspaceTarget, SubscribeBase, WorkspaceFileSearchParams } from './AgentV4Stub.js';
 
 export interface AgentV4ConnectOptions {
   /** 客户端持久化 id（设备侧由 @ohos.util.generateRandomUUID 生成并落 preferences）。 */
@@ -81,6 +92,7 @@ function topicOf(kind: TopicKind, target: WorkspaceTarget, sessionId?: string): 
 export class AgentV4Client {
   readonly hello: HelloMessage;
   private readonly stub: ZCodeAgentStub;
+  private readonly fileStub: WorkspaceFileStub;
   private readonly channelClient: ChannelClient;
   private readonly target: WorkspaceTarget;
   private readonly sessionsIndexAssembler = new TopicWireFrameAssembler<SessionsIndexTopicFrame>(
@@ -104,6 +116,7 @@ export class AgentV4Client {
   ) {
     this.channelClient = channelClient;
     this.stub = stub;
+    this.fileStub = new WorkspaceFileStub(channelClient.getChannel(FILE_CHANNEL));
     this.hello = hello;
     this.target = target;
   }
@@ -259,6 +272,59 @@ export class AgentV4Client {
       ...params,
     });
     return v4ConversationFileChangesResultSchema.parse(raw);
+  }
+
+  // ── @ 引用：工作区文件搜索（file 通道，rootPath/身份自动注入）──
+
+  searchWorkspaceFiles(params: { query: string; limit?: number; refresh?: boolean }): Promise<object[]> {
+    return this.fileStub.searchWorkspaceFiles({
+      rootPath: this.target.workspacePath,
+      ...(this.target.workspaceIdentity ? { workspaceIdentity: this.target.workspaceIdentity } : {}),
+      ...params,
+    });
+  }
+
+  // ── 附件分块上传（connectionId 自动取 hello；结果过 schema 校验）──
+
+  async attachmentBegin(sessionId: string, uploadId: string, fileName: string, mime: string,
+    totalBytes: number, totalChunks: number, checksum: string): Promise<unknown> {
+    const raw = await this.stub.attachmentBeginV4({
+      connectionId: this.hello.connectionId,
+      uploadId: uploadId,
+      sessionId: sessionId,
+      fileName: fileName,
+      mime: mime,
+      totalBytes: totalBytes,
+      totalChunks: totalChunks,
+      checksum: checksum,
+    });
+    return v4AttachmentBeginResultSchema.parse(raw);
+  }
+
+  attachmentChunk(sessionId: string, uploadId: string, chunkIndex: number, dataBase64: string): Promise<unknown> {
+    return this.stub.attachmentChunkV4({
+      connectionId: this.hello.connectionId,
+      uploadId: uploadId,
+      sessionId: sessionId,
+      chunkIndex: chunkIndex,
+      dataBase64: dataBase64,
+    }).then((raw: object) => v4AttachmentChunkResultSchema.parse(raw));
+  }
+
+  attachmentCommit(sessionId: string, uploadId: string): Promise<unknown> {
+    return this.stub.attachmentCommitV4({
+      connectionId: this.hello.connectionId,
+      uploadId: uploadId,
+      sessionId: sessionId,
+    }).then((raw: object) => v4AttachmentCommitResultSchema.parse(raw));
+  }
+
+  attachmentAbort(sessionId: string, uploadId: string): Promise<void> {
+    return this.stub.attachmentAbortV4({
+      connectionId: this.hello.connectionId,
+      uploadId: uploadId,
+      sessionId: sessionId,
+    });
   }
 
   /** 有序关闭：取消所有事件上游并释放通道客户端。 */

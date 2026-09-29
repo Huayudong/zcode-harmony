@@ -16,9 +16,11 @@ import fs from '@ohos.file.fs';
 import util from '@ohos.util';
 import common from '@ohos.app.ability.common';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import {
   ConversationModel,
   Emitter,
+  PROTOCOL_V4_LIMITS,
   SessionsIndexModel,
   parseFileChangesResult,
   type ConversationRowView,
@@ -66,6 +68,52 @@ interface SendTextPayload {
   text: string;
   /** 按次提交的协作模式（build/plan；问答档待 Q3 澄清）。缺省走服务端会话当前模式。 */
   mode?: string;
+  /** 已就绪附件的引用集（ref 只在 commit 后产生）。 */
+  attachments?: SendAttachmentRef[];
+}
+
+interface SendAttachmentRef {
+  ref: string;
+  fileName: string;
+  mime: string;
+  bytes: number;
+}
+
+interface RawFileEntry {
+  name?: string;
+  relativePath?: string;
+  type?: string;
+}
+
+/** 服务端 begin/chunk/commit 结果的运行时形状（已过协议 schema 校验）。 */
+interface AttachmentBeginLike {
+  state?: string;
+  ref?: string;
+}
+
+interface AttachmentChunkLike {
+  nextChunkIndex?: number;
+}
+
+interface AttachmentCommitLike {
+  ref?: string;
+}
+
+/** 全量字节的 SHA-256（cryptoFramework 增量喂入，512KiB 一批）。 */
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const md = cryptoFramework.createMd('SHA-256');
+  const blockSize = 512 * 1024;
+  for (let start = 0; start < bytes.length; start += blockSize) {
+    const block = bytes.subarray(start, Math.min(start + blockSize, bytes.length));
+    const blob: cryptoFramework.DataBlob = { data: block };
+    await md.update(blob);
+  }
+  const digest = await md.digest();
+  const parts: string[] = [];
+  for (const byte of digest.data) {
+    parts.push(byte.toString(16).padStart(2, '0'));
+  }
+  return `sha256:${parts.join('')}`;
 }
 
 interface StopPayload {
@@ -76,6 +124,34 @@ interface StopPayload {
 export interface ResolveAnswer {
   optionId?: string;
   freeText?: string;
+}
+
+/** 附件编排状态（INP-3）：uploading→ready（commit 得 ref）/failed；ref 只在 ready 后非空。 */
+export interface AttachmentItem {
+  uploadId: string;
+  fileName: string;
+  mime: string;
+  bytes: number;
+  localUri: string;
+  isImage: boolean;
+  state: 'uploading' | 'ready' | 'failed';
+  sentChunks: number;
+  totalChunks: number;
+  ref: string;
+  error: string;
+}
+
+/** 附件列表事件（任一状态变化整表下发）。 */
+export interface AttachmentUpdate {
+  sessionId: string;
+  items: AttachmentItem[];
+}
+
+/** @ 引用的文件候选（file 通道 searchWorkspaceFiles 投影）。 */
+export interface WorkspaceFileView {
+  name: string;
+  relativePath: string;
+  type: string;
 }
 
 interface ResolveInteractionPayload {
@@ -113,12 +189,14 @@ export class WorkbenchController {
   private readonly sessionsEmitter = new Emitter<SessionSummaryView[]>();
   private readonly conversationEmitter = new Emitter<ConversationUpdate>();
   private readonly faultEmitter = new Emitter<V4Fault>();
+  private readonly attachmentEmitter = new Emitter<AttachmentUpdate>();
 
   private profile: ConnectionProfile | null = null;
   private engine: ConnectionEngine | null = null;
   private cache: SessionCache | null = null;
   private readonly sessionsModel = new SessionsIndexModel();
   private readonly conversationModels = new Map<string, ConversationModel>();
+  private readonly attachmentsBySession = new Map<string, AttachmentItem[]>();
   private readonly pendingConversations = new Set<string>();
   private readonly conversationFlushTimers = new Map<string, number>();
   private sessionsIndexPending = true;
@@ -148,6 +226,10 @@ export class WorkbenchController {
 
   get onFault(): Event<V4Fault> {
     return this.faultEmitter.event;
+  }
+
+  get onAttachmentChanged(): Event<AttachmentUpdate> {
+    return this.attachmentEmitter.event;
   }
 
   // ── 查询面 ──
@@ -454,16 +536,171 @@ export class WorkbenchController {
 
   // ── 命令面（全部走 engine 幂等队列）──
 
-  /** 发送文本；mode 为按次协作模式（'build'|'plan'，空串 = 跟随服务端会话当前模式）。 */
-  async sendText(sessionId: string, text: string, mode: string): Promise<void> {
+  /** 发送文本；mode 为按次协作模式（'build'|'plan'，空串 = 跟随服务端会话当前模式）；
+   *  attachments 传当前会话的附件集，只有 ready 状态的会随信封引用发送，发送成功后整组清除。 */
+  async sendText(sessionId: string, text: string, mode: string, attachments: AttachmentItem[]): Promise<void> {
     const engine = this.engine;
     if (engine === null) {
       throw new Error('未连接');
     }
-    const payload: SendTextPayload = mode.length > 0
-      ? { text: text, mode: mode }
-      : { text: text };
+    const ready: SendAttachmentRef[] = [];
+    for (const item of attachments) {
+      if (item.state === 'ready' && item.ref.length > 0) {
+        ready.push({ ref: item.ref, fileName: item.fileName, mime: item.mime, bytes: item.bytes });
+      }
+    }
+    let payload: SendTextPayload;
+    if (mode.length > 0 && ready.length > 0) {
+      payload = { text: text, mode: mode, attachments: ready };
+    } else if (mode.length > 0) {
+      payload = { text: text, mode: mode };
+    } else if (ready.length > 0) {
+      payload = { text: text, attachments: ready };
+    } else {
+      payload = { text: text };
+    }
     await engine.sendCommand(sessionId, 'sendText', payload);
+    if (ready.length > 0) {
+      this.attachmentsBySession.delete(sessionId);
+      this.fireAttachments(sessionId);
+    }
+  }
+
+  // ── INP-3 附件编排（begin → chunk×N → commit；失败/取消 → abort）──
+
+  attachmentsOf(sessionId: string): AttachmentItem[] {
+    const items = this.attachmentsBySession.get(sessionId);
+    return items !== undefined ? items : [];
+  }
+
+  /**
+   * 选取结果入队上传：全量读入的文件字节 → begin（总量 + sha256）→ 顺序 chunk
+   * （≤512KiB/块，nextChunkIndex 以服务端 ACK 为准）→ commit 换 ref。
+   * 超限（20MiB / 64 块）与离线直接 failed，不做排队（附件不是命令）。
+   */
+  async attachFile(sessionId: string, fileName: string, mime: string, bytes: Uint8Array,
+    localUri: string, isImage: boolean): Promise<void> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    if (bytes.length > PROTOCOL_V4_LIMITS.attachmentMaxBytes) {
+      throw new Error(`附件超过 ${Math.round(PROTOCOL_V4_LIMITS.attachmentMaxBytes / 1024 / 1024)}MiB 上限`);
+    }
+    const totalChunks = Math.ceil(bytes.length / PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes);
+    if (totalChunks > PROTOCOL_V4_LIMITS.attachmentUploadMaxChunks) {
+      throw new Error('附件分块数超限');
+    }
+    const uploadId = util.generateRandomUUID();
+    const item: AttachmentItem = {
+      uploadId: uploadId,
+      fileName: fileName,
+      mime: mime,
+      bytes: bytes.length,
+      localUri: localUri,
+      isImage: isImage,
+      state: 'uploading',
+      sentChunks: 0,
+      totalChunks: totalChunks,
+      ref: '',
+      error: '',
+    };
+    let items = this.attachmentsBySession.get(sessionId);
+    if (items === undefined) {
+      items = [];
+      this.attachmentsBySession.set(sessionId, items);
+    }
+    items.push(item);
+    this.fireAttachments(sessionId);
+
+    try {
+      const checksum = await sha256Hex(bytes);
+      const beginRaw = await engine.attachmentBegin(sessionId, uploadId, fileName, mime,
+        bytes.length, totalChunks, checksum);
+      const begin = beginRaw as AttachmentBeginLike;
+      if ((begin.state ?? '') === 'committed') {
+        item.ref = begin.ref ?? '';
+        item.state = 'ready';
+        item.sentChunks = totalChunks;
+        this.fireAttachments(sessionId);
+        return;
+      }
+      const base64 = new util.Base64Helper();
+      for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes;
+        const block = bytes.subarray(start, Math.min(start + PROTOCOL_V4_LIMITS.attachmentChunkMaxBytes, bytes.length));
+        const chunkRaw = await engine.attachmentChunk(sessionId, uploadId, index, base64.encodeToStringSync(block));
+        const next = (chunkRaw as AttachmentChunkLike).nextChunkIndex ?? 0;
+        item.sentChunks = next > 0 ? next : index + 1;
+        this.fireAttachments(sessionId);
+      }
+      const commitRaw = await engine.attachmentCommit(sessionId, uploadId);
+      item.ref = (commitRaw as AttachmentCommitLike).ref ?? '';
+      item.state = item.ref.length > 0 ? 'ready' : 'failed';
+      if (item.state === 'failed') {
+        item.error = 'commit 未返回引用';
+      }
+    } catch (error) {
+      item.state = 'failed';
+      item.error = error instanceof Error ? error.message : String(error);
+      // 半上传尽力回收（TTL 5min 兜底，失败无副作用）
+      try {
+        await engine.attachmentAbort(sessionId, uploadId);
+      } catch (abortError) {
+        hilog.warn(0, 'Workbench', 'attachment abort failed: %{public}s', String(abortError));
+      }
+    }
+    this.fireAttachments(sessionId);
+  }
+
+  /** 移除附件（uploading 中先 abort，服务端按 TTL 兜底）。 */
+  async removeAttachment(sessionId: string, uploadId: string): Promise<void> {
+    const items = this.attachmentsBySession.get(sessionId);
+    if (items === undefined) {
+      return;
+    }
+    const target = items.find((item: AttachmentItem) => item.uploadId === uploadId);
+    this.attachmentsBySession.set(sessionId, items.filter((item: AttachmentItem) => item.uploadId !== uploadId));
+    this.fireAttachments(sessionId);
+    if (target !== undefined && target.state === 'uploading' && this.engine !== null) {
+      try {
+        await this.engine.attachmentAbort(sessionId, uploadId);
+      } catch (error) {
+        // 尽力回收
+      }
+    }
+  }
+
+  /** @ 引用（INP-4）：Host 索引模糊搜索，返回有界候选。 */
+  async searchWorkspaceFiles(query: string, limit: number): Promise<WorkspaceFileView[]> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    const entries = await engine.searchWorkspaceFiles(query, limit);
+    const out: WorkspaceFileView[] = [];
+    for (const entry of entries) {
+      const record = entry as RawFileEntry;
+      const relativePath = record.relativePath ?? '';
+      if (relativePath.length === 0) {
+        continue;
+      }
+      out.push({
+        name: record.name ?? relativePath,
+        relativePath: relativePath,
+        type: record.type ?? 'file',
+      });
+    }
+    return out;
+  }
+
+  private fireAttachments(sessionId: string): void {
+    const items = this.attachmentsBySession.get(sessionId);
+    const update: AttachmentUpdate = {
+      sessionId: sessionId,
+      items: items !== undefined ? items : [],
+    };
+    this.attachmentEmitter.fire(update);
   }
 
   async stopSession(sessionId: string): Promise<void> {

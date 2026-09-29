@@ -101,6 +101,38 @@ export class ZCodeAgentStub {
     return this.call('conversationFileChangesV4', params);
   }
 
+  /** 附件分块上传：begin 声明总量与校验和 → chunk 顺序投喂（≤512KiB/块）→ commit 换 ref。 */
+  attachmentBeginV4(params: {
+    connectionId: string;
+    uploadId: string;
+    sessionId: string;
+    fileName: string;
+    mime: string;
+    totalBytes: number;
+    totalChunks: number;
+    checksum: string;
+  }): Promise<object> {
+    return this.call('attachmentBeginV4', params);
+  }
+
+  attachmentChunkV4(params: {
+    connectionId: string;
+    uploadId: string;
+    sessionId: string;
+    chunkIndex: number;
+    dataBase64: string;
+  }): Promise<object> {
+    return this.call('attachmentChunkV4', params);
+  }
+
+  attachmentCommitV4(params: { connectionId: string; uploadId: string; sessionId: string }): Promise<object> {
+    return this.call('attachmentCommitV4', params);
+  }
+
+  attachmentAbortV4(params: { connectionId: string; uploadId: string; sessionId: string }): Promise<void> {
+    return this.call('attachmentAbortV4', params);
+  }
+
   sendConversationCommandV4(
     params: WorkspaceTarget & { envelope: object },
   ): Promise<object> {
@@ -121,5 +153,29 @@ export class ZCodeAgentStub {
   /** workspace 级 sessions-index 下行帧流（同一通知，按 topic 前缀分流）。 */
   onDynamicSessionsIndexFrame(target: WorkspaceTarget): Event<unknown> {
     return this.listenDynamic('onDynamicSessionsIndexFrame', target);
+  }
+}
+
+/** IFileService 显式桩（@ 引用的文件搜索；/ws 上与 agent 通道同批暴露）。 */
+export const FILE_CHANNEL = 'file';
+
+export interface WorkspaceFileSearchParams {
+  rootPath: string;
+  workspaceIdentity?: string;
+  query: string;
+  limit?: number;
+  refresh?: boolean;
+}
+
+export class WorkspaceFileStub {
+  private readonly channel: IChannel;
+
+  constructor(channel: IChannel) {
+    this.channel = channel;
+  }
+
+  /** Host 端索引检索，返回有界候选（name/path/relativePath/type）。 */
+  searchWorkspaceFiles(params: WorkspaceFileSearchParams): Promise<object[]> {
+    return this.channel.call<object[]>('searchWorkspaceFiles', [params]);
   }
 }

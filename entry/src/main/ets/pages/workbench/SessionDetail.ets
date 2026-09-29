@@ -1,7 +1,17 @@
 import router from '@ohos.router';
 import preferences from '@ohos.data.preferences';
 import pasteboard from '@ohos.pasteboard';
-import { WorkbenchController, type ConversationUpdate, type ResolveAnswer } from 'connection';
+import fs from '@ohos.file.fs';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { picker } from '@kit.CoreFileKit';
+import {
+  WorkbenchController,
+  type AttachmentItem,
+  type AttachmentUpdate,
+  type ConversationUpdate,
+  type ResolveAnswer,
+  type WorkspaceFileView
+} from 'connection';
 import type { ConnectionStateEvent } from 'connection';
 import type {
   ConversationRowView,
@@ -61,6 +71,16 @@ struct SessionDetail {
   @State expandedFiles: string[] = [];
   @State expandedCodeBlocks: string[] = [];
   @State actionsRowId: number = -1;
+  @State attachments: AttachmentItem[] = [];
+  @State attachBusy: boolean = false;
+  @State atPanelOpen: boolean = false;
+  @State atQuery: string = '';
+  @State atResults: WorkspaceFileView[] = [];
+  @State atLoading: boolean = false;
+  @State atHint: string = '';
+  @State atPrefix: string = '';
+  @State atPosition: number = -1;
+  private atSearchTimer: number = -1;
   private controller: WorkbenchController | null = null;
   private sessionId: string = '';
   private disposables: IDisposable[] = [];
@@ -109,6 +129,11 @@ struct SessionDetail {
         this.sessionTitle = update.title;
       }
       this.refreshTurns();
+    }));
+    this.disposables.push(controller.onAttachmentChanged((update: AttachmentUpdate) => {
+      if (update.sessionId === this.sessionId) {
+        this.attachments = update.items;
+      }
     }));
     if (this.sessionId.length > 0) {
       this.rows = await controller.openSession(this.sessionId);
@@ -329,10 +354,14 @@ struct SessionDetail {
     if (text.length === 0 || this.sending || this.controller === null || this.sessionId.length === 0) {
       return;
     }
+    if (this.attachments.findIndex((item: AttachmentItem) => item.state === 'uploading') >= 0) {
+      this.sendHint = '附件上传中，稍候…';
+      return;
+    }
     this.sending = true;
     this.sendHint = '';
     try {
-      await this.controller.sendText(this.sessionId, text, this.sendMode);
+      await this.controller.sendText(this.sessionId, text, this.sendMode, this.attachments);
       this.inputText = '';
       this.stopArmed = false;
       void this.persistDraft();
@@ -371,6 +400,134 @@ struct SessionDetail {
         this.sendHint = '';
       }
     }, 2500);
+  }
+
+  // ── INP-3 附件（相册/文件 → 读字节 → 控制器编排上传）──
+
+  private async pickImage(): Promise<void> {
+    if (this.attachBusy || this.sessionId.length === 0) {
+      return;
+    }
+    const controller = this.controller;
+    if (controller === null) {
+      return;
+    }
+    this.attachBusy = true;
+    try {
+      const photoPicker = new photoAccessHelper.PhotoViewPicker();
+      const options: photoAccessHelper.PhotoSelectOptions = {
+        MIMEType: photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE,
+        maxSelectNumber: 5,
+      };
+      const result: photoAccessHelper.PhotoSelectResult = await photoPicker.select(options);
+      for (const uri of result.photoUris) {
+        const picked = readPickedFile(uri);
+        await controller.attachFile(this.sessionId, picked.fileName, picked.mime, picked.bytes, uri, true);
+      }
+    } catch (error) {
+      this.sendHint = `选图失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.attachBusy = false;
+  }
+
+  private async pickDocument(): Promise<void> {
+    if (this.attachBusy || this.sessionId.length === 0) {
+      return;
+    }
+    const controller = this.controller;
+    if (controller === null) {
+      return;
+    }
+    this.attachBusy = true;
+    try {
+      const docPicker = new picker.DocumentViewPicker();
+      const options: picker.DocumentSelectOptions = { maxSelectNumber: 5 };
+      const result: string[] = await docPicker.select(options);
+      for (const uri of result) {
+        const picked = readPickedFile(uri);
+        await controller.attachFile(this.sessionId, picked.fileName, picked.mime, picked.bytes, uri, false);
+      }
+    } catch (error) {
+      this.sendHint = `选文件失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.attachBusy = false;
+  }
+
+  private removeAttachment(uploadId: string): void {
+    if (this.controller === null || this.sessionId.length === 0) {
+      return;
+    }
+    void this.controller.removeAttachment(this.sessionId, uploadId);
+  }
+
+  // ── INP-4 @ 引用面板 ──
+
+  private onMainInputChanged(value: string): void {
+    this.inputText = value;
+    this.scheduleDraftSave();
+    if (value.length > 0 && value.charAt(value.length - 1) === '@') {
+      this.openAtPanel();
+    } else if (this.atPanelOpen && !value.startsWith(this.atPrefix)) {
+      this.closeAtPanel();
+    }
+  }
+
+  private openAtPanel(): void {
+    this.atPosition = this.inputText.length - 1;
+    this.atPrefix = this.inputText;
+    this.atQuery = '';
+    this.atResults = [];
+    this.atHint = '';
+    this.atPanelOpen = true;
+    this.scheduleAtSearch();
+  }
+
+  private closeAtPanel(): void {
+    this.atPanelOpen = false;
+    this.atResults = [];
+    if (this.atSearchTimer >= 0) {
+      clearTimeout(this.atSearchTimer);
+      this.atSearchTimer = -1;
+    }
+  }
+
+  private scheduleAtSearch(): void {
+    if (this.atSearchTimer >= 0) {
+      clearTimeout(this.atSearchTimer);
+    }
+    this.atSearchTimer = setTimeout((): void => {
+      this.atSearchTimer = -1;
+      void this.runAtSearch();
+    }, 300);
+  }
+
+  private async runAtSearch(): Promise<void> {
+    const controller = this.controller;
+    if (controller === null) {
+      return;
+    }
+    this.atLoading = true;
+    try {
+      this.atResults = await controller.searchWorkspaceFiles(this.atQuery, 30);
+      this.atHint = '';
+    } catch (error) {
+      this.atResults = [];
+      this.atHint = `搜索失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.atLoading = false;
+  }
+
+  /** 插入标准 mention 转译：markdown 链接 [basename](relativePath)，目录补尾斜杠。 */
+  private insertMention(entry: WorkspaceFileView): void {
+    const suffix = entry.type === 'directory' ? '/' : '';
+    const label = entry.name.replace(/[\[\]]/g, '');
+    const dest = (entry.relativePath + suffix).replace(/[()]/g, '');
+    const base = this.inputText.startsWith(this.atPrefix)
+      ? this.atPrefix.substring(0, this.atPrefix.length - 1)
+      : this.inputText;
+    this.inputText = `${base}[${label}](${dest}) `;
+    this.closeAtPanel();
+    this.scheduleDraftSave();
   }
 
   /** 批准/应答（OUT-4）：interactionId 幂等，竞态以 CLI 准入为准。 */
@@ -459,6 +616,132 @@ struct SessionDetail {
       .onClick(() => {
         this.sendMode = value;
       })
+  }
+
+  @Builder
+  AttachmentChips() {
+    Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+      ForEach(this.attachments, (item: AttachmentItem) => {
+        Row({ space: 6 }) {
+          Text(item.isImage ? '🖼' : '📄')
+            .fontSize(12)
+          Column({ space: 1 }) {
+            Text(item.fileName)
+              .fontSize(11)
+              .fontColor(ZcodeColors.textPrimary())
+              .maxLines(1)
+              .constraintSize({ maxWidth: 140 })
+            if (item.state === 'uploading') {
+              Text(`上传 ${item.sentChunks}/${item.totalChunks}`)
+                .fontSize(9)
+                .fontColor(ZcodeColors.textTertiary())
+            } else if (item.state === 'failed') {
+              Text(item.error.length > 0 ? item.error : '上传失败')
+                .fontSize(9)
+                .fontColor(ZcodeColors.DESTRUCTIVE)
+                .maxLines(1)
+            } else {
+              Text(`${Math.max(1, Math.round(item.bytes / 1024))} KB`)
+                .fontSize(9)
+                .fontColor(ZcodeColors.textTertiary())
+            }
+          }
+          .alignItems(HorizontalAlign.Start)
+
+          Text('✕')
+            .fontSize(10)
+            .fontColor(ZcodeColors.textTertiary())
+            .onClick(() => {
+              this.removeAttachment(item.uploadId);
+            })
+        }
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .borderRadius(10)
+        .backgroundColor(ZcodeColors.card())
+        .border({ width: item.state === 'failed' ? 1 : 0, color: ZcodeColors.DESTRUCTIVE })
+        .margin({ right: 6, bottom: 4 })
+      }, (item: AttachmentItem) => item.uploadId)
+    }
+    .width('100%')
+  }
+
+  @Builder
+  AtPanel() {
+    Column({ space: 6 }) {
+      Row({ space: 8 }) {
+        Text('@ 引用工作区文件')
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+        Blank()
+        Text('关闭')
+          .fontSize(11)
+          .fontColor(ZcodeColors.BRAND_LIGHT)
+          .onClick(() => {
+            this.closeAtPanel();
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      TextInput({ text: this.atQuery, placeholder: '输入文件名模糊搜索…' })
+        .fontSize(13)
+        .fontColor(ZcodeColors.textPrimary())
+        .placeholderColor(ZcodeColors.textTertiary())
+        .backgroundColor(ZcodeColors.background())
+        .borderRadius(10)
+        .onChange((value: string) => {
+          this.atQuery = value;
+          this.scheduleAtSearch();
+        })
+
+      if (this.atLoading) {
+        Text('搜索中…')
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+      }
+      if (this.atHint.length > 0) {
+        Text(this.atHint)
+          .fontSize(11)
+          .fontColor(ZcodeColors.WARNING)
+      }
+
+      List({ space: 2 }) {
+        ForEach(this.atResults, (entry: WorkspaceFileView) => {
+          ListItem() {
+            Row({ space: 8 }) {
+              Text(entry.type === 'directory' ? '📁' : '📄')
+                .fontSize(12)
+              Column({ space: 1 }) {
+                Text(entry.name)
+                  .fontSize(13)
+                  .fontColor(ZcodeColors.textPrimary())
+                  .maxLines(1)
+                Text(entry.relativePath)
+                  .fontSize(10)
+                  .fontColor(ZcodeColors.textTertiary())
+                  .maxLines(1)
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .padding(6)
+            .borderRadius(8)
+            .onClick(() => {
+              this.insertMention(entry);
+            })
+          }
+        }, (entry: WorkspaceFileView) => entry.relativePath)
+      }
+      .height(180)
+      .scrollBar(BarState.Off)
+      .width('100%')
+    }
+    .padding(10)
+    .borderRadius(12)
+    .backgroundColor(ZcodeColors.card())
+    .border({ width: 1, color: ZcodeColors.BRAND })
+    .margin({ left: 16, right: 16, bottom: 4 })
   }
 
   @Builder
@@ -1079,6 +1362,11 @@ struct SessionDetail {
             .padding(3)
         }
 
+        // INP-4：@ 引用面板
+        if (this.atPanelOpen) {
+          this.AtPanel()
+        }
+
         // INP-5：快捷指令 chips（横滑）
         Scroll() {
           Row({ space: 8 }) {
@@ -1104,6 +1392,9 @@ struct SessionDetail {
         // INP-1/6/7：输入舱（胶囊容器 + 模式选择 + 发送/停止同位形变）
         Row({ space: 10 }) {
           Column({ space: 6 }) {
+            if (this.attachments.length > 0) {
+              this.AttachmentChips()
+            }
             TextArea({
               text: this.inputText,
               placeholder: this.stateEvent.state === 'online' ? '给 Agent 发消息…' : '离线中，消息将排队…',
@@ -1121,11 +1412,22 @@ struct SessionDetail {
                 this.inputFocused = false;
               })
               .onChange((value: string) => {
-                this.inputText = value;
-                this.scheduleDraftSave();
+                this.onMainInputChanged(value);
               })
 
             Row({ space: 6 }) {
+              Text('📷')
+                .fontSize(14)
+                .opacity(this.attachBusy ? 0.4 : 1)
+                .onClick(() => {
+                  void this.pickImage();
+                })
+              Text('📄')
+                .fontSize(13)
+                .opacity(this.attachBusy ? 0.4 : 1)
+                .onClick(() => {
+                  void this.pickDocument();
+                })
               Text('模式')
                 .fontSize(10)
                 .fontColor(ZcodeColors.textTertiary())
@@ -1210,5 +1512,74 @@ struct SessionDetail {
     .width('100%')
     .height('100%')
     .backgroundColor(ZcodeColors.background())
+  }
+}
+
+
+/** 选择器取回的一个文件（全量读入字节；20MiB 上限在读取时即拦截）。 */
+interface PickedFile {
+  fileName: string;
+  mime: string;
+  bytes: Uint8Array;
+  localUri: string;
+  isImage: boolean;
+}
+
+function guessMime(fileName: string): string {
+  const lowered = fileName.toLowerCase();
+  if (lowered.endsWith('.jpg') || lowered.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lowered.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lowered.endsWith('.gif')) {
+    return 'image/gif';
+  }
+  if (lowered.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lowered.endsWith('.pdf')) {
+    return 'application/pdf';
+  }
+  if (lowered.endsWith('.txt') || lowered.endsWith('.md')) {
+    return 'text/plain';
+  }
+  if (lowered.endsWith('.json')) {
+    return 'application/json';
+  }
+  if (lowered.endsWith('.zip')) {
+    return 'application/zip';
+  }
+  return 'application/octet-stream';
+}
+
+function readPickedFile(uri: string): PickedFile {
+  const file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+  try {
+    const stat = fs.statSync(file.fd);
+    if (stat.size > 20 * 1024 * 1024) {
+      throw new Error('附件超过 20MiB 上限');
+    }
+    const bytes = new Uint8Array(stat.size);
+    let bufferOffset = 0;
+    while (bufferOffset < stat.size) {
+      const read = fs.readSync(file.fd, bytes.subarray(bufferOffset), { offset: bufferOffset });
+      if (read <= 0) {
+        break;
+      }
+      bufferOffset += read;
+    }
+    const fileName = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
+    const picked: PickedFile = {
+      fileName: fileName,
+      mime: guessMime(fileName),
+      bytes: bytes,
+      localUri: uri,
+      isImage: false,
+    };
+    return picked;
+  } finally {
+    fs.closeSync(file);
   }
 }
