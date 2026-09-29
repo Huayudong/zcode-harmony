@@ -26,6 +26,7 @@ import {
   type WorkspaceTarget,
 } from 'protocol';
 import { Emitter, type Event, type IDisposable } from 'protocol';
+import { PerfMarks } from 'utils';
 import { WebSocketTransport } from '../ws/WebSocketTransport';
 import { PinnedHttpTarget } from '../http/PinnedHttpClient';
 
@@ -224,6 +225,7 @@ export class ConnectionEngine {
       await this.resubscribeAll();
       await this.flushQueue();
       this.setState('online', '已连接');
+      PerfMarks.measure('6.3 重连恢复(断线→online)', 'reconnect_begin', 3000);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // 半建状态一并回收（客户端可能未建完，socket 必须先关）
@@ -238,6 +240,7 @@ export class ConnectionEngine {
 
   private handleDrop(detail: string): void {
     void detail;
+    PerfMarks.mark('reconnect_begin');
     this.teardownTransport();
     if (this.manualStop) {
       this.setState('offline', '已断开');

@@ -1,5 +1,6 @@
 import router from '@ohos.router';
 import { ConnectionProfile, ProfileStore } from 'connection';
+import { PerfMarks } from 'utils';
 import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
 
 /**
@@ -26,6 +27,7 @@ struct Index {
       this.profile = null;
     }
     this.loading = false;
+    PerfMarks.measure('M1 冷启动(应用内口径: onCreate→首页出现)', 'cold_start');
     // A5：已配对 → 工作台是首页；replace 失败（预览器）停留本页，卡片仍可手动进入。
     if (this.profile !== null) {
       router.replaceUrl({ url: 'pages/workbench/SessionList' }).catch(() => {});

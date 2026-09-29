@@ -6,6 +6,7 @@ import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { picker } from '@kit.CoreFileKit';
 import { cameraPicker, camera } from '@kit.CameraKit';
 import { parseBlocks } from './MdParserTask';
+import { PerfMarks } from 'utils';
 import {
   WorkbenchController,
   type AttachmentItem,
@@ -90,6 +91,7 @@ struct SessionDetail {
   private draftTimer: number = -1;
 
   aboutToAppear(): void {
+    PerfMarks.mark('session_open');
     const params = router.getParams() as SessionRouteParams | null;
     if (params !== null) {
       this.sessionId = params.sessionId;
@@ -149,6 +151,7 @@ struct SessionDetail {
       this.rows = await controller.openSession(this.sessionId);
     }
     this.refreshTurns();
+    PerfMarks.measure('6.3 会话页打开(至数据就绪)', 'session_open');
     this.refreshTimeline();
     this.precomputeBlocks(this.rows);
     await this.loadDraft();
