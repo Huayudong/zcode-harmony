@@ -390,6 +390,51 @@ export class ConnectionEngine {
     };
     return await client.conversationFileChanges(params) as object;
   }
+
+  // ── @ 引用文件搜索（file 通道；需在线）──
+
+  searchWorkspaceFiles(query: string, limit: number): Promise<object[]> {
+    const client = this.client;
+    if (client === null) {
+      return Promise.reject(new Error('未连接'));
+    }
+    return client.searchWorkspaceFiles({ query: query, limit: limit });
+  }
+
+  // ── 附件分块上传（需在线；上传是服务调用不是命令，失败由编排层决定重试/放弃）──
+
+  attachmentBegin(sessionId: string, uploadId: string, fileName: string, mime: string,
+    totalBytes: number, totalChunks: number, checksum: string): Promise<object> {
+    const client = this.client;
+    if (client === null) {
+      return Promise.reject(new Error('未连接'));
+    }
+    return client.attachmentBegin(sessionId, uploadId, fileName, mime, totalBytes, totalChunks, checksum) as Promise<object>;
+  }
+
+  attachmentChunk(sessionId: string, uploadId: string, chunkIndex: number, dataBase64: string): Promise<object> {
+    const client = this.client;
+    if (client === null) {
+      return Promise.reject(new Error('未连接'));
+    }
+    return client.attachmentChunk(sessionId, uploadId, chunkIndex, dataBase64) as Promise<object>;
+  }
+
+  attachmentCommit(sessionId: string, uploadId: string): Promise<object> {
+    const client = this.client;
+    if (client === null) {
+      return Promise.reject(new Error('未连接'));
+    }
+    return client.attachmentCommit(sessionId, uploadId) as Promise<object>;
+  }
+
+  attachmentAbort(sessionId: string, uploadId: string): Promise<void> {
+    const client = this.client;
+    if (client === null) {
+      return Promise.reject(new Error('未连接'));
+    }
+    return client.attachmentAbort(sessionId, uploadId);
+  }
 }
 
 interface FileChangesRowTarget {
