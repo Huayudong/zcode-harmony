@@ -566,6 +566,18 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | INP-8 草稿 | ✅ | preferences 按会话持久（draft_<sessionId>，500ms 去抖+离页即存+发送即清） |
 | 门禁 | ✅ 18/18 + 构建 | sendText.mode 信封测试；spec：鸿蒙仓 `docs/specs/a6-input.md`；INP-3 附件/INP-4 @引用因服务通道缺口（v4 分块上传/workspaceFileSearch）待 L3 stub 扩展批 |
 
+### Batch 10（2026-09-29）：A7 后半——变更 Tab + Diff 卡片（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 只读查询通道 | ✅ | AgentV4Stub/Client +conversationFileChangesV4（schema 批次6 transport 子集已带，**零新协议面**）；与命令通道分离——只读、无状态、不入 commandId 幂等队列（与 rows/range、plans 同族） |
+| 投影 | ✅ | parseFileChangesResult → FileChangesReportView（files/±/state/items[path,±,toolNames,hunks]）；RowView +entityId 与 turnHeader.fileChanges 聚合；ConversationModel +revision()/logEpoch()（查询 base 取自快照） |
+| 三 Tab 骨架 | ✅ | SessionDetail：对话 / 变更（P0）/ 产物（P1 占位）；变更 Tab = 轮次 chips（turnHeader 聚合，默认最新）→ 总览条 → 文件列表 → hunks 着色（±行 DIFF_ADD/DEL 底色，等宽） |
+| OUT-2 代码块 | ✅ | assistantText 按 ``` 围栏切分：语言徽标 + pasteboard 一键复制 + 超 20 行折叠；未闭合围栏按暂态代码渲染防闪烁 |
+| OUT-7/8 | ✅ 部分 | 失败回复卡片化（重试动作后续）；长按消息内联操作行（复制 / 引用到输入框） |
+| 门禁 | ✅ 19/19 + 构建 | fixture 过移植 result schema → 投影断言；spec：鸿蒙仓 `docs/specs/a7-changes.md` |
+| 范围外 | — | 全屏 diff 查看器、OUT-1 增量管线、产物 Tab、OUT-7 重试动作、OUT-6 时间线 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
