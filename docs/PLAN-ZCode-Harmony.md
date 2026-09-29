@@ -638,6 +638,15 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 环境偏差 | ⚠️ | 加密驱动复发 + 首次带病推送（add -A 卷入调试残留；守卫 \'&&…||…&&\' 优先级错误）→ 7 文件 stdin 重入库 + 索引移除杂项 + amend + force-with-lease 修正为 52c24b3；`git add -A` 此后禁用，改显式清单暂存 |
 | 真机批遗留 | — | 相机/TaskPool 并发行为实测、问答档执行语义产品复核 |
 
+### Batch 17（2026-09-29）：A10 性能自埋点 + 联调就绪工具（App，真机批前置）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 6.3 自埋点 | ✅ | `commons/utils/perf/PerfMarks`（mark/measure + 采样限流，hilog 输出「6.3 <指标>: N ms」）；接线四项：冷启动（onCreate→首页出现）/会话页打开（至数据就绪）/chunk 上屏逻辑段（2s 采样）/重连恢复（断线→online，3s 采样）——真机跑 S 场景即得 6.3 实测数据 |
+| 联调就绪工具 | ✅ | `tools/device-readiness.sh`（一致性/HAP/签名/真机四项检查）；`docs/scene-checklist.md`（S1/S2/S4 场景步骤-预期-指标核对 + 批次11-16 功能抽查表） |
+| 门禁 | ✅ 22/22 + 构建 | connection 增 utils 依赖；**ohpm 自身缓存文件被驱动加密致 install 崩溃**（JSON 首字符 '%'）→ 手工 oh_modules junction 补链绕过（重装 ohpm 缓存或白名单后恢复） |
+| 真机批入口 | — | 设备就绪后：`bash tools/device-readiness.sh` → 按 `docs/scene-checklist.md` 执行，hilog 过滤 PerfMarks 即 6.3 实测 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
