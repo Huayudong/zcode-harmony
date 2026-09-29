@@ -113,4 +113,14 @@ export class SessionCache {
       hilog.warn(DOMAIN, TAG, 'dropConversation %{public}s failed: %{public}s', sessionId, String(error));
     }
   }
+
+  /** A9 设置：清空全部本地会话缓存（不动档案与凭证）。 */
+  async clearAll(): Promise<void> {
+    try {
+      await this.store.executeSql(`DELETE FROM ${TABLE_CONVERSATIONS}`);
+      await this.store.executeSql(`DELETE FROM ${TABLE_SESSIONS}`);
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'clearAll failed: %{public}s', String(error));
+    }
+  }
 }
