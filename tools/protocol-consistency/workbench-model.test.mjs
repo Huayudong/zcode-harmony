@@ -10,6 +10,8 @@ const workbench = await import(V4.replace('index.js', 'WorkbenchModel.js'));
 const rows = await import(V4.replace('index.js', 'rows.js'));
 const delta = await import(V4.replace('index.js', 'delta.js'));
 const sessionsIndex = await import(V4.replace('index.js', 'sessions-index.js'));
+const snapshotMod = await import(V4.replace('index.js', 'snapshot.js'));
+const commandMod = await import(V4.replace('index.js', 'command.js'));
 
 // ── fixtures（先过 schema，保证测的是契约形状而非自造形状）──
 
@@ -165,4 +167,108 @@ test('conversation 缓存往返与防御', () => {
   const cold = new workbench.ConversationModel('s-2');
   assert.equal(cold.applyFrame({ payload: { kind: 'deltas', deltas } }), false);
   assert.equal(cold.rows().length, 0);
+});
+
+// ── 4. 批准链路（批次8 / OUT-3/4）：pendingInteractions 投影 + resolveInteraction 信封 ──
+
+const pendingPermission = snapshotMod.pendingInteractionSchema.parse({
+  interactionId: 'i-1',
+  kind: 'permission',
+  anchorRowId: 3,
+  createdAt: 1_726_000_000_000,
+  payload: {
+    kind: 'permission',
+    toolCallId: 'tc-1',
+    toolName: 'Bash',
+    summary: '运行 npm test',
+    detail: null,
+    options: [
+      { optionId: 'allow_once', label: '允许一次', kind: 'allowOnce' },
+      { optionId: 'deny', label: '拒绝', kind: 'deny' },
+    ],
+  },
+});
+const pendingAsk = snapshotMod.pendingInteractionSchema.parse({
+  interactionId: 'i-2',
+  kind: 'userInput',
+  anchorRowId: null,
+  createdAt: 1_726_000_000_000,
+  payload: {
+    kind: 'userInput',
+    prompt: '选择协作模式',
+    freeText: false,
+    options: [{ optionId: 'plan', label: 'Plan 模式' }],
+  },
+});
+const pendingQuestion = snapshotMod.pendingInteractionSchema.parse({
+  interactionId: 'i-3',
+  kind: 'userInput',
+  anchorRowId: null,
+  createdAt: 1_726_000_000_000,
+  payload: {
+    kind: 'userInput',
+    prompt: '请确认执行方式',
+    freeText: true,
+    sensitive: true,
+    questions: [
+      { question: '使用哪个模型？', header: '模型', options: [{ value: 'glm', label: 'GLM' }] },
+    ],
+    currentQuestionIndex: 0,
+  },
+});
+
+test('批准链路：pendingInteractions 投影、state.updated 坍缩、resolveInteraction 信封', () => {
+  const model = new workbench.ConversationModel('s-1');
+  model.applyFrame({
+    payload: {
+      kind: 'snapshot',
+      snapshot: { rows: { window: [], totalCount: 0, firstRowId: null }, pendingInteractions: [pendingPermission, pendingAsk, pendingQuestion] },
+    },
+  });
+
+  const pending = model.pendingInteractions();
+  assert.equal(pending.length, 3);
+  // permission：summary + 工具名 + 服务端选项词表
+  assert.equal(pending[0].kind, 'permission');
+  assert.equal(pending[0].toolName, 'Bash');
+  assert.equal(pending[0].title, '运行 npm test');
+  assert.deepEqual(pending[0].options, [
+    { optionId: 'allow_once', label: '允许一次', kind: 'allowOnce' },
+    { optionId: 'deny', label: '拒绝', kind: 'deny' },
+  ]);
+  // userInput 单问题：prompt + 顶层 options
+  assert.equal(pending[1].kind, 'userInput');
+  assert.equal(pending[1].title, '选择协作模式');
+  assert.deepEqual(pending[1].options, [{ optionId: 'plan', label: 'Plan 模式', kind: '' }]);
+  // AskUserQuestion 多问题：取当前问题与其选项；freeText/sensitive 透出
+  assert.equal(pending[2].title, '使用哪个模型？');
+  assert.deepEqual(pending[2].options, [{ optionId: 'glm', label: 'GLM', kind: '' }]);
+  assert.equal(pending[2].freeText, true);
+  assert.equal(pending[2].sensitive, true);
+
+  // state.updated{pendingInteractions:[]} → 卡片坍缩（键级整体替换）
+  model.applyFrame({
+    payload: {
+      kind: 'deltas',
+      deltas: [delta.conversationDeltaSchema.parse({ op: 'state.updated', patch: { pendingInteractions: [] } })],
+    },
+  });
+  assert.equal(model.pendingInteractions().length, 0);
+
+  // resolveInteraction 信封：optionId / freeText 两种应答都过原 schema；缺 answer 拒绝
+  const base = { commandId: 'cmd-1', clientId: 'client-1', sessionId: 's-1', type: 'resolveInteraction', issuedAt: 1_726_000_000_000 };
+  assert.equal(commandMod.parseCommandEnvelope({
+    ...base,
+    payload: { interactionId: 'i-1', answer: { optionId: 'allow_once' } },
+  }).ok, true);
+  assert.equal(commandMod.parseCommandEnvelope({
+    ...base,
+    commandId: 'cmd-2',
+    payload: { interactionId: 'i-3', answer: { freeText: '自定义答复' } },
+  }).ok, true);
+  assert.equal(commandMod.parseCommandEnvelope({
+    ...base,
+    commandId: 'cmd-3',
+    payload: { interactionId: 'i-1' },
+  }).ok, false);
 });

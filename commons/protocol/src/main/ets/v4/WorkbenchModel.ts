@@ -30,6 +30,31 @@ export interface SessionSummaryView {
   lastAssistantPreview: string;
 }
 
+/** 待处理交互的应答选项（permission 用服务端词表；userInput 为题面选项）。 */
+export interface PendingInteractionOptionView {
+  optionId: string;
+  label: string;
+  /** allowOnce/allowAlways/deny/custom；userInput 选项为空串。 */
+  kind: string;
+}
+
+/** 待处理交互视图（OUT-3/4 吸底卡片的数据面）。 */
+export interface PendingInteractionView {
+  interactionId: string;
+  /** permission/userInput/workspaceHookReview（第三类本批只提示不在手机处理）。 */
+  kind: string;
+  /** 卡片主文案：permission=summary；userInput=当前问题。 */
+  title: string;
+  /** permission 的工具名（空串 = 无）。 */
+  toolName: string;
+  /** 允许自由文本应答（permission.freeText / userInput.freeText）。 */
+  freeText: boolean;
+  /** userInput 敏感输入（密码类，UI 禁历史）。 */
+  sensitive: boolean;
+  options: PendingInteractionOptionView[];
+  createdAt: number;
+}
+
 /** 对话行视图（conversation 投影；字段按 kind 取用，未涉及的为空值）。 */
 export interface ConversationRowView {
   rowId: number;
@@ -250,6 +275,63 @@ function rowViewFrom(source: Record<string, unknown>): ConversationRowView {
   };
 }
 
+/** 待处理交互投影（permission/userInput 各取卡片所需的最小面）。 */
+function pendingFrom(source: Record<string, unknown>): PendingInteractionView {
+  const payload = child(source, "payload");
+  const kind = str(source, "kind");
+  const view: PendingInteractionView = {
+    interactionId: str(source, "interactionId"),
+    kind: kind,
+    title: "",
+    toolName: "",
+    freeText: false,
+    sensitive: false,
+    options: [],
+    createdAt: num(source, "createdAt"),
+  };
+  if (kind === "permission" && payload !== null) {
+    view.title = str(payload, "summary");
+    view.toolName = str(payload, "toolName");
+    view.freeText = bool(payload, "freeText");
+    for (const item of arr(payload, "options")) {
+      const option = asRecord(item);
+      if (option === null) {
+        continue;
+      }
+      view.options.push({ optionId: str(option, "optionId"), label: str(option, "label"), kind: str(option, "kind") });
+    }
+  } else if (kind === "userInput" && payload !== null) {
+    view.freeText = bool(payload, "freeText");
+    view.sensitive = bool(payload, "sensitive");
+    // AskUserQuestion 多问题：取当前问题与其选项；单问题用 prompt + 顶层 options。
+    const questions = arr(payload, "questions");
+    const index = num(payload, "currentQuestionIndex");
+    const question = questions.length > 0
+      ? asRecord(questions[Math.min(Math.max(index, 0), questions.length - 1)])
+      : null;
+    if (question !== null) {
+      view.title = str(question, "question");
+      for (const item of arr(question, "options")) {
+        const option = asRecord(item);
+        if (option === null) {
+          continue;
+        }
+        view.options.push({ optionId: str(option, "value"), label: str(option, "label"), kind: "" });
+      }
+    } else {
+      view.title = str(payload, "prompt");
+      for (const item of arr(payload, "options")) {
+        const option = asRecord(item);
+        if (option === null) {
+          continue;
+        }
+        view.options.push({ optionId: str(option, "optionId"), label: str(option, "label"), kind: "" });
+      }
+    }
+  }
+  return view;
+}
+
 export class ConversationModel {
   readonly sessionId: string;
   private snapshot: Record<string, unknown> | null = null;
@@ -292,6 +374,18 @@ export class ConversationModel {
   /** 服务端写入的会话标题（meta.title；空串 = 无）。 */
   title(): string {
     return str(child(this.snapshot, "meta"), "title");
+  }
+
+  /** 待处理交互视图（OUT-3/4 吸底卡片数据面；state.updated{pendingInteractions} 即整体替换）。 */
+  pendingInteractions(): PendingInteractionView[] {
+    const out: PendingInteractionView[] = [];
+    for (const item of arr(this.snapshot, "pendingInteractions")) {
+      const record = asRecord(item);
+      if (record !== null) {
+        out.push(pendingFrom(record));
+      }
+    }
+    return out;
   }
 
   /** 是否有流式中的内容（正文/工具在跑）——停止按钮与「进行中」徽标依据。 */
