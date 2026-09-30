@@ -657,6 +657,18 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 22/22 + 构建 | 加密驱动复发被 if 守卫**成功拦截**（3 文件命中 → 中止 → stdin 修复 → 干净提交 94dded4）——批次15/16 事故的教训已生效 |
 | 真机批遗留 | — | 通知点击路由、触感实际体验、OUT-1 TaskPool 性能基线（需设备） |
 
+### Batch 19（2026-09-30）：会话管理命令——新建/删除/CAS 原生重试（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 误判纠正 | ⚠️→✅ | 批次14 曾把 M1 抽屉「新建按钮」与归档一并判为"协议不支持"；复读 commandPayloadSchemas 全键发现 **createSession/deleteSession/retryTurn/editUserQuery 均在既有词表**（归档确实无命令）——教训：判"协议不支持"前必须穷举命令键 |
+| 新建按钮（M1） | ✅ | 列表头「＋」→ createSession（draft 空会话；workspaceId 由 SessionsIndexModel 从快照新捕获）→ ACK result.sessionId 直达会话页；Agent 由服务端创建，铁律不违 |
+| 删除会话 | ✅ | 长按「删除」→ deleteSession；服务端权威删除，列表经 session.removed 回流自愈 |
+| OUT-7 正解 | ✅ | 失败卡片「重试本轮」→ retryTurn（target=失败行）——**行定位 CAS 命令**：信封带快照 baseRevision+baseLogEpoch，过期重试服务端按 stale 拒；该语义由门禁测试逼出（首版缺 CAS 被拒） |
+| 引擎面 | ✅ | CommandType +3；sendCommandAwait（仅在线、读 ACK result、不入队）；信封增可选 CAS 字段 |
+| 门禁 | ✅ 23/23 + 构建 | ArkTS 严格模式三处收敛（对象展开/内联字面量/any）；spec：鸿蒙仓 `docs/specs/batch19-session-mgmt.md`；加密驱动复发被 if 守卫拦截后 stdin 修复，干净提交 b8b2ffb |
+| 遗留 | — | 归档（无 v4 命令，需协议演进）、editUserQuery 原生替换"修改后重发"、新建首输入直达；真机验收随 S 系列 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
