@@ -1,6 +1,7 @@
 {
   "app": {
     "bundleName": "com.zcode.harmony",
+    "appIdentifier": "6918743671956180204",
     "vendor": "zcode",
     "versionCode": 1000000,
     "versionName": "0.1.0",
