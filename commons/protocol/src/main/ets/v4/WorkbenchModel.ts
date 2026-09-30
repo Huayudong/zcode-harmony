@@ -185,12 +185,19 @@ function summaryFrom(source: Record<string, unknown>): SessionSummaryView {
 
 export class SessionsIndexModel {
   private readonly bySessionId = new Map<string, SessionSummaryView>();
+  private lastWorkspaceId = '';
+
+  /** 快照携带的 workspaceId（createSession 命令载荷需要；空串 = 尚未收到快照）。 */
+  workspaceId(): string {
+    return this.lastWorkspaceId;
+  }
 
   /** 应用一帧；返回列表是否变化。 */
   applyFrame(frame: WorkbenchFrameLike): boolean {
     const { kind, body } = payloadOf(frame);
     if (kind === "snapshot" && body !== null) {
       this.bySessionId.clear();
+      this.lastWorkspaceId = str(body, "workspaceId");
       for (const item of arr(body, "sessions")) {
         const record = asRecord(item);
         if (record === null) {

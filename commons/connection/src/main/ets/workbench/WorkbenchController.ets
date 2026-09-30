@@ -171,6 +171,26 @@ interface RenameSessionPayload {
   title: string;
 }
 
+interface CreateSessionPayload {
+  workspaceId: string;
+}
+
+interface CreateSessionResultLike {
+  sessionId?: string;
+}
+
+interface EmptyCommandPayload {
+}
+
+interface RetryTurnTarget {
+  rowId: number;
+  entityId: string;
+}
+
+interface RetryTurnPayload {
+  target: RetryTurnTarget;
+}
+
 /** 缓存装载用的快照载荷形状（与服务端 sessions-index snapshot 同构的最小集）。 */
 interface CachedSessionsSnapshot {
   sessions: object[];
@@ -903,6 +923,54 @@ export class WorkbenchController {
     }
     const raw = await engine.queryFileChanges(sessionId, turnRowId, turnEntityId, model.revision(), baseLogEpoch);
     return parseFileChangesResult(raw);
+  }
+
+  /** 新建会话（M1 抽屉「新建按钮」）：createSession（draft 空会话），返回新 sessionId。
+   *  架构铁律不违——Agent 仍由服务端 runtime 创建，手机只发命令。 */
+  async createSession(): Promise<string> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    const workspaceId = this.sessionsModel.workspaceId();
+    if (workspaceId.length === 0) {
+      throw new Error('会话索引未就绪，稍后再试');
+    }
+    const payload: CreateSessionPayload = { workspaceId: workspaceId };
+    const result = await engine.sendCommandAwait('', 'createSession', payload);
+    const shaped = result as CreateSessionResultLike;
+    const sessionId = shaped?.sessionId ?? '';
+    if (sessionId.length === 0) {
+      throw new Error('服务端未返回新会话 id');
+    }
+    return sessionId;
+  }
+
+  /** 删除会话（服务端权威删除，sessions-index delta 回流后列表自愈）。 */
+  async deleteSession(sessionId: string): Promise<void> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    const payload: EmptyCommandPayload = {};
+    await engine.sendCommand(sessionId, 'deleteSession', payload);
+  }
+
+  /** 原生重试（OUT-7 正解）：retryTurn 定位到失败行所在轮，服务端按轮重跑。
+   *  行定位命令走 CAS：信封必须带快照 baseRevision + baseLogEpoch，过期重试服务端按 stale 拒绝。 */
+  async retryTurn(sessionId: string, rowId: number, entityId: string): Promise<void> {
+    const engine = this.engine;
+    const model = this.conversationModels.get(sessionId);
+    if (engine === null || model === undefined) {
+      throw new Error('未连接');
+    }
+    const baseLogEpoch = model.logEpoch();
+    if (baseLogEpoch.length === 0) {
+      throw new Error('会话快照未就绪');
+    }
+    const target: RetryTurnTarget = { rowId: rowId, entityId: entityId };
+    const payload: RetryTurnPayload = { target: target };
+    await engine.sendCommand(sessionId, 'retryTurn', payload, model.revision(), baseLogEpoch);
   }
 
   /** 会话改名（A9 列表重命名；title 走 renameSession 幂等命令，服务端落 meta.title）。 */

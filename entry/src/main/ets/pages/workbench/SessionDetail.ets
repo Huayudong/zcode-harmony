@@ -205,6 +205,19 @@ struct SessionDetail {
     this.timeline = steps;
   }
 
+  /** OUT-7 正解：retryTurn 原生重试（定位失败行，服务端按轮重跑）。 */
+  private async retryFailedTurn(row: ConversationRowView): Promise<void> {
+    if (this.controller === null || this.sessionId.length === 0) {
+      return;
+    }
+    try {
+      await this.controller.retryTurn(this.sessionId, row.rowId, row.entityId);
+      this.sendHint = '';
+    } catch (error) {
+      this.sendHint = `重试失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
   private lastUserInputText(): string {
     let lastUserInput = '';
     for (const row of this.rows) {
@@ -1109,11 +1122,11 @@ struct SessionDetail {
             Text('回复生成失败')
               .fontSize(12)
               .fontColor(ZcodeColors.DESTRUCTIVE)
-            Text('重发上一条')
+            Text('重试本轮')
               .fontSize(12)
               .fontColor(ZcodeColors.BRAND_LIGHT)
               .onClick(() => {
-                this.resendLastInput();
+                void this.retryFailedTurn(row);
               })
             Text('修改后重发')
               .fontSize(12)

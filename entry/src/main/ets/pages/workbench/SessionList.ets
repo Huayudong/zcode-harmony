@@ -194,6 +194,34 @@ struct SessionList {
     }
   }
 
+  /** M1 抽屉「新建按钮」：createSession draft → 直达新会话页。 */
+  private async createNewSession(): Promise<void> {
+    if (this.controller === null) {
+      return;
+    }
+    try {
+      const sessionId = await this.controller.createSession();
+      const params: SessionRouteParams = { sessionId: sessionId, title: '' };
+      router.pushUrl({ url: 'pages/workbench/SessionDetail', params: params }).catch(() => {});
+    } catch (error) {
+      showToast(`新建会话失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 删除会话：服务端权威删除，列表经 sessions-index delta 自愈。 */
+  private async confirmDelete(summary: SessionSummaryView): Promise<void> {
+    if (this.controller === null) {
+      return;
+    }
+    this.actionsSessionId = '';
+    try {
+      await this.controller.deleteSession(summary.sessionId);
+      showToast('已提交删除');
+    } catch (error) {
+      showToast(`删除失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private startRename(summary: SessionSummaryView): void {
     this.actionsSessionId = '';
     this.renaming = summary;
@@ -373,6 +401,12 @@ struct SessionList {
             .onClick(() => {
               this.startRename(summary);
             })
+          Text('删除')
+            .fontSize(12)
+            .fontColor(ZcodeColors.DESTRUCTIVE)
+            .onClick(() => {
+              void this.confirmDelete(summary);
+            })
           Text('归档请用桌面端')
             .fontSize(11)
             .fontColor(ZcodeColors.textTertiary())
@@ -444,6 +478,14 @@ struct SessionList {
                 this.retryConnection();
               })
           }
+
+          Text('＋')
+            .fontSize(22)
+            .fontColor(ZcodeColors.BRAND_LIGHT)
+            .margin({ right: 10 })
+            .onClick(() => {
+              void this.createNewSession();
+            })
 
           Text('⚙')
             .fontSize(18)
