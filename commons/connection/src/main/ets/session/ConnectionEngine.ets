@@ -51,6 +51,14 @@ export interface EngineOptions {
 }
 
 /** v4 命令信封（.ets 侧本地形状；协议侧 schema 校验由一致性门禁覆盖）。 */
+/** ACK 运行时形状（协议侧 CommandAck 类型域经 zod-ambient 收敛，此处按字段读取）。 */
+interface AckResultLike {
+  status?: string;
+  message?: string;
+  reasonCode?: string;
+  result?: object;
+}
+
 interface EngineCommandEnvelope {
   commandId: string;
   clientId: string;
@@ -58,10 +66,14 @@ interface EngineCommandEnvelope {
   type: CommandType;
   payload: object;
   issuedAt: number;
+  /** CAS 命令（retryTurn 等行定位命令）必须携带：快照 revision + logEpoch。 */
+  baseRevision?: number;
+  baseLogEpoch?: string;
 }
 
 /** v4 命令词表（本批使用面；批次14 增 renameSession 会话改名）。 */
-export type CommandType = 'sendText' | 'stop' | 'resolveInteraction' | 'renameSession';
+export type CommandType = 'sendText' | 'stop' | 'resolveInteraction' | 'renameSession'
+  | 'createSession' | 'deleteSession' | 'retryTurn';
 
 const BACKOFF_SCHEDULE_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
 
@@ -327,7 +339,8 @@ export class ConnectionEngine {
   // ── 命令面（幂等排队）──
 
   /** 发送命令；非 online 或发送失败时入队，重连后按序 flush（commandId 幂等）。 */
-  async sendCommand(sessionId: string, type: CommandType, payload: object): Promise<void> {
+  async sendCommand(sessionId: string, type: CommandType, payload: object,
+    baseRevision?: number, baseLogEpoch?: string): Promise<void> {
     const envelope: EngineCommandEnvelope = {
       commandId: util.generateRandomUUID(),
       clientId: this.options.clientId,
@@ -336,7 +349,34 @@ export class ConnectionEngine {
       payload: payload,
       issuedAt: Date.now(),
     };
+    if (baseRevision !== undefined) {
+      envelope.baseRevision = baseRevision;
+    }
+    if (baseLogEpoch !== undefined) {
+      envelope.baseLogEpoch = baseLogEpoch;
+    }
     await this.deliverOrQueue(envelope);
+  }
+
+  /** 需要读 ACK 结果的命令（如 createSession 回 sessionId）：仅在线，不入队；返回 ack.result。 */
+  async sendCommandAwait(sessionId: string, type: CommandType, payload: object): Promise<object | null> {
+    const client = this.client;
+    if (client === null || this.state !== 'online') {
+      throw new Error('该操作需要在线');
+    }
+    const envelope: EngineCommandEnvelope = {
+      commandId: util.generateRandomUUID(),
+      clientId: this.options.clientId,
+      sessionId: sessionId.length > 0 ? sessionId : null,
+      type: type,
+      payload: payload,
+      issuedAt: Date.now(),
+    };
+    const ack = await client.sendCommand(envelope) as AckResultLike;
+    if (ack.status === 'rejected' || ack.status === 'stale' || ack.status === 'failed') {
+      throw new Error(ack.message ?? ack.reasonCode ?? `服务端拒绝（${ack.status}）`);
+    }
+    return ack.result ?? null;
   }
 
   private async deliverOrQueue(envelope: EngineCommandEnvelope): Promise<void> {

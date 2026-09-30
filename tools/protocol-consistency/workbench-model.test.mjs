@@ -357,3 +357,33 @@ test('fileChanges 投影与 turnHeader 聚合、快照水位取值', () => {
   assert.equal(model.revision(), 7);
   assert.equal(model.logEpoch(), 'epoch-1');
 });
+
+// ── 7. 会话管理命令（批次19 / M1 抽屉「新建按钮」+ OUT-7 原生重试）──
+test('createSession/deleteSession/retryTurn 信封：合法载荷过 schema', () => {
+  const FENCE = '```';
+  const mk = (commandId, type, payload, sessionId) => ({
+    commandId, clientId: 'client-1', sessionId, type, payload, issuedAt: 1_726_000_000_000,
+  });
+  // createSession：全局命令（sessionId=null）+ workspaceId 载荷
+  const r1 = commandMod.parseCommandEnvelope(mk('cmd-n1', 'createSession', { workspaceId: 'ws-1' }, null));
+  assert.equal(r1.ok, true);
+  // 缺 workspaceId 拒绝
+  const r1b = commandMod.parseCommandEnvelope(mk('cmd-n1b', 'createSession', {}, null));
+  assert.equal(r1b.ok, false);
+  // deleteSession：会话级空载荷
+  const r2 = commandMod.parseCommandEnvelope(mk('cmd-n2', 'deleteSession', {}, 's-1'));
+  assert.equal(r2.ok, true);
+  // retryTurn：行定位命令走 CAS——信封必须带 baseRevision+baseLogEpoch，载荷 target 成对
+  const mkCas = (commandId, payload) => ({
+    ...mk(commandId, 'retryTurn', payload, 's-1'), baseRevision: 7, baseLogEpoch: 'epoch-1',
+  });
+  const r3 = commandMod.parseCommandEnvelope(mkCas('cmd-n3', { target: { rowId: 5, entityId: 'e-5' } }));
+  assert.equal(r3.ok, true);
+  // 缺 CAS 字段 → 拒绝（服务端防过期重试）
+  const r3cas = commandMod.parseCommandEnvelope(mk('cmd-n3c', 'retryTurn', { target: { rowId: 5, entityId: 'e-5' } }, 's-1'));
+  assert.equal(r3cas.ok, false);
+  // target 字段不完整 → 拒绝
+  const r3b = commandMod.parseCommandEnvelope(mkCas('cmd-n3b', { target: { rowId: 5 } }));
+  assert.equal(r3b.ok, false);
+  void FENCE;
+});
