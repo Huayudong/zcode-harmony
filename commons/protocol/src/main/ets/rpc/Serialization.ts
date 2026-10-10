@@ -212,6 +212,7 @@ export function serialize(writer: IWriter, data: unknown): void {
 
 export function deserialize(reader: IReader): unknown {
   const type = reader.read(1).readUInt8(0);
+    console.info('ZCodeSer deserialize type=' + String(type));
 
   switch (type) {
     case DataType.Undefined:
@@ -224,6 +225,7 @@ export function deserialize(reader: IReader): unknown {
       return reader.read(readIntVQL(reader));
     case DataType.Array: {
       const length = readIntVQL(reader);
+      console.info('ZCodeSer array length=' + String(length));
       const result: unknown[] = [];
       for (let i = 0; i < length; i++) {
         result.push(deserialize(reader));

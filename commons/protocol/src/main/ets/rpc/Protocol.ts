@@ -178,8 +178,15 @@ export function writeProtocolMessage(msg: ProtocolMessage): VSBuffer {
 
 export class SocketProtocol implements IMessagePassingProtocol {
   private readonly _onMessage = new Emitter<VSBuffer>();
-  public readonly onMessage: Event<VSBuffer> = this._onMessage.event;
-
+  private messageListenerAttached = false;
+  public readonly onMessage: Event<VSBuffer> = (listener) => {
+    const sub = this._onMessage.event(listener);
+    if (!this.messageListenerAttached) {
+      this.messageListenerAttached = true;
+      Promise.resolve().then(() => { this.readMessages(); }); // 微任务首刷：等同一轮注册的等待者就位
+    }
+    return sub;
+  };
   private readonly chunkStream = new ChunkStream();
   private readonly disposables = new DisposableStore();
   private readonly socket: ISocket;
@@ -203,6 +210,7 @@ export class SocketProtocol implements IMessagePassingProtocol {
   }
 
   private readMessages(): void {
+    if (!this.messageListenerAttached) { return; } // 帧留在 ChunkStream，待首个监听者挂载后统一分派
     while (true) {
       const header = this.chunkStream.peek(HEADER_SIZE);
       if (!header) {
