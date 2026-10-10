@@ -118,7 +118,7 @@ struct PairingSelfCheck {
       if (session.caPem.length > 0) {
         await ensureCaFileWritten(getContext(this).filesDir, session.caPem);
       }
-      await probeWsHandshake(target, '/ws', caFilePathIn(getContext(this).filesDir));
+      await probeWsHandshake(target, '/ws', caFilePathIn(getContext(this).filesDir), 8000, session.token);
       wssOk = true;
       this.setStep(STEP_INDEX_WSS, 'pass', '安全通道就绪');
     } catch (error) {

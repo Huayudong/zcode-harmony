@@ -15,6 +15,7 @@
  * - 状态所有者：每档案一个 engine；M1 单活连接（PRD Q2）。
  */
 import connection from '@ohos.net.connection';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import util from '@ohos.util';
 import {
   AgentV4Client,
@@ -211,11 +212,10 @@ export class ConnectionEngine {
     let transport: WebSocketTransport | null = null;
     try {
       transport = new WebSocketTransport();
-      await transport.connect(this.options.target_http, this.options.bearerToken, this.options.caFilePath);
-
-      // 与 web 客户端同链路：SocketProtocol（13 字节分帧）直连 /ws；
-      // 可靠性由 v4 水位重订阅（snapshot/resume）承担，PersistentProtocol 不在此链路。
+      // 先订阅 dataEmitter 再 connect：服务端在握手完成后立即下发 Initialize 帧，
+      // 若 connect resolve 后才挂监听会错过该帧 → ChannelClient 永远 Uninitialized（死锁）。
       const protocol = new SocketProtocol(transport);
+      await transport.connect(this.options.target_http, this.options.bearerToken, this.options.caFilePath);
       const client = await AgentV4Client.connect(protocol, this.options.target, {
         clientId: this.options.clientId,
         appVersion: this.options.appVersion,
@@ -240,6 +240,7 @@ export class ConnectionEngine {
       PerfMarks.measure('6.3 重连恢复(断线→online)', 'reconnect_begin', 3000);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      hilog.error(0x0000, 'ZCodeConn', 'connect fail: %{public}s', message);
       // 半建状态一并回收（客户端可能未建完，socket 必须先关）
       if (transport !== null) {
         transport.dispose();

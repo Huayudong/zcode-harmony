@@ -7,6 +7,8 @@
  * Authorization: Bearer <deviceToken>（SRV-2 Bearer 通道）。
  */
 import webSocket from '@ohos.net.webSocket';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
 import { BusinessError } from '@ohos.base';
 import { VSBuffer, Emitter, type ISocket, type Event, type IDisposable } from 'protocol';
 import { PinnedHttpTarget } from '../http/PinnedHttpClient';
@@ -43,8 +45,18 @@ export class WebSocketTransport implements ISocket {
 
     this.ws.on('message', (_err: BusinessError, value: string | ArrayBuffer) => {
       // /ws 只走二进制帧（socket 协议 13 字节分帧）；文本帧忽略
-      if (value instanceof ArrayBuffer) {
-        this.dataEmitter.fire(VSBuffer.wrap(new Uint8Array(value)));
+      const raw: object = value as object;
+      hilog.info(0x0000, 'ZCodeWs', 'frame in type=%{public}s len=%{public}d', typeof value, (value as ArrayBuffer).byteLength);
+      try {
+        if (raw instanceof ArrayBuffer) {
+          this.dataEmitter.fire(VSBuffer.wrap(new Uint8Array(raw)));
+        } else if (raw instanceof Uint8Array) {
+          this.dataEmitter.fire(VSBuffer.wrap(raw));
+        } else {
+          hilog.warn(0x0000, 'ZCodeWs', 'frame in 非二进制: %{public}s', String(value).slice(0, 40));
+        }
+      } catch (e) {
+        hilog.error(0x0000, 'ZCodeWs', 'dispatch throw: %{public}s', String(e).slice(0, 250));
       }
     });
     this.ws.on('close', (_err: BusinessError, _value: webSocket.CloseResult) => {
@@ -55,6 +67,7 @@ export class WebSocketTransport implements ISocket {
     });
 
     await this.ws.connect(url, options);
+    hilog.info(0x0000, 'ZCodeWs', 'transport connect resolved');
   }
 
   private fireClosed(): void {
@@ -75,6 +88,7 @@ export class WebSocketTransport implements ISocket {
     if (this.closed) {
       return;
     }
+    hilog.info(0x0000, 'ZCodeWs', 'frame out %{public}d: %{public}s', buffer.byteLength, JSON.stringify(Array.from(buffer.buffer.slice(0, 20))));
     this.ws.send(this.toArrayBuffer(buffer)).catch(() => {
       this.fireClosed();
     });

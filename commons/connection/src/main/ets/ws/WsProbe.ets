@@ -8,13 +8,18 @@ import { BusinessError } from '@ohos.base';
 import { PinnedHttpError, PinnedHttpTarget } from '../http/PinnedHttpClient';
 
 export async function probeWsHandshake(target: PinnedHttpTarget, path: string,
-  caFilePath: string, timeoutMs: number = 8000): Promise<void> {
+  caFilePath: string, timeoutMs: number = 8000, bearerToken: string = ''): Promise<void> {
   const scheme = target.caPem.length > 0 ? 'wss' : 'ws';
   const url = `${scheme}://${target.host}:${target.port}${path}`;
   const ws = webSocket.createWebSocket();
   const options: webSocket.WebSocketRequestOptions = {};
   if (target.caPem.length > 0 && caFilePath.length > 0) {
     options.caPath = caFilePath;
+  }
+  if (bearerToken.length > 0) {
+    const headerMap: Record<string, string> = {};
+    headerMap['Authorization'] = `Bearer ${bearerToken}`;
+    options.header = headerMap;
   }
   return new Promise<void>((resolve, reject) => {
     let settled = false;
