@@ -13,12 +13,20 @@ import { BusinessError } from '@ohos.base';
 import { VSBuffer, Emitter, type ISocket, type Event, type IDisposable } from 'protocol';
 import { PinnedHttpTarget } from '../http/PinnedHttpClient';
 
+/** server /ws 契约：每 5s 下发一帧 KeepAlive（type 9）。客户端以入站静默判死：
+ * 检测间隔 5s，静默 15s（约连丢 3 帧）即视为断线，交由上层退避重连。 */
+const HEARTBEAT_CHECK_INTERVAL_MS = 5000;
+const HEARTBEAT_SILENCE_TIMEOUT_MS = 15000;
+
 export class WebSocketTransport implements ISocket {
   private readonly ws: webSocket.WebSocket = webSocket.createWebSocket();
   private readonly dataEmitter = new Emitter<VSBuffer>();
   private readonly closeEmitter = new Emitter<void>();
   private readonly endEmitter = new Emitter<void>();
   private closed = false;
+  /** 最近一次入站帧时间（心跳活性依据）。 */
+  private lastInboundAt = 0;
+  private heartbeatTimer: number = -1;
 
   readonly onData: Event<VSBuffer> = this.dataEmitter.event;
   readonly onClose: Event<void> = this.closeEmitter.event;
@@ -32,6 +40,7 @@ export class WebSocketTransport implements ISocket {
     const scheme = target.caPem.length > 0 ? 'wss' : 'ws';
     const url = `${scheme}://${target.host}:${target.port}/ws`;
     const options: webSocket.WebSocketRequestOptions = {};
+    options.proxy = 'no-proxy'; // 同 PinnedHttpClient：钉扎直连不经系统代理
     if (target.caPem.length > 0 && caFilePath.length > 0) {
       options.caPath = caFilePath;
     }
@@ -44,6 +53,7 @@ export class WebSocketTransport implements ISocket {
     }
 
     this.ws.on('message', (_err: BusinessError, value: string | ArrayBuffer) => {
+      this.lastInboundAt = Date.now();
       // /ws 只走二进制帧（socket 协议 13 字节分帧）；文本帧忽略
       const raw: object = value as object;
       hilog.info(0x0000, 'ZCodeWs', 'frame in type=%{public}s len=%{public}d', typeof value, (value as ArrayBuffer).byteLength);
@@ -67,7 +77,31 @@ export class WebSocketTransport implements ISocket {
     });
 
     await this.ws.connect(url, options);
+    this.lastInboundAt = Date.now();
+    this.startHeartbeat();
     hilog.info(0x0000, 'ZCodeWs', 'transport connect resolved');
+  }
+
+  /** 入站静默监测：超阈即判死，上层经 onEnd 触发退避重连。 */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.closed) {
+        return;
+      }
+      const silentFor = Date.now() - this.lastInboundAt;
+      if (silentFor > HEARTBEAT_SILENCE_TIMEOUT_MS) {
+        hilog.error(0x0000, 'ZCodeWs', 'heartbeat timeout: silent %{public}dms, mark dead', silentFor);
+        this.fireClosed();
+      }
+    }, HEARTBEAT_CHECK_INTERVAL_MS);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== -1) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = -1;
+    }
   }
 
   private fireClosed(): void {
@@ -75,6 +109,7 @@ export class WebSocketTransport implements ISocket {
       return;
     }
     this.closed = true;
+    this.stopHeartbeat();
     this.closeEmitter.fire();
     this.endEmitter.fire();
   }
@@ -85,6 +120,7 @@ export class WebSocketTransport implements ISocket {
   }
 
   write(buffer: VSBuffer): void {
+    console.info('ZCodeWs write enter len=' + String(buffer.byteLength) + ' closed=' + String(this.closed));
     if (this.closed) {
       return;
     }

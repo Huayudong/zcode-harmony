@@ -5,6 +5,7 @@
 import { z } from "./zod-ambient";
 import { PROTOCOL_V4_LIMITS } from "./core.js";
 import { crc32WireBytes, decodeWireBase64 } from "./wire-binary.js";
+import { utf8Encode } from "../rpc/Buffer.js";
 import { measureTopicNotificationEnvelopeBytes } from "./wire-codec.js";
 import type { TopicFrameDeliveryKind, TopicWireFrameCandidate } from "./wire.js";
 
@@ -276,7 +277,7 @@ export class TopicWireFrameAssembler<F> {
         events.push(this.fault(active, "proto.frameAssemblyMetadataMismatch"));
         return events;
       }
-      const logicalBytes = new TextEncoder().encode(JSON.stringify(wire.frame)).byteLength;
+      const logicalBytes = utf8Encode(JSON.stringify(wire.frame)).byteLength;
       if (logicalBytes > this.maxAssemblyBytes) {
         this.settle(key, wire);
         events.push(this.fault(wire, "proto.frameAssemblyTooLarge"));

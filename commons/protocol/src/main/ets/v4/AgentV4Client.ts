@@ -191,7 +191,7 @@ export class AgentV4Client {
     const result = await this.stub.subscribeSessionsIndexV4({
       workspacePath: this.target.workspacePath,
       ...(this.target.workspaceIdentity ? { workspaceIdentity: this.target.workspaceIdentity } : {}),
-      runtimePolicy: 'existing-only',
+      runtimePolicy: 'start-if-needed',
       ...(params?.base ? { base: params.base } : {}),
       ...(params?.visibility ? { visibility: params.visibility } : {}),
     });
@@ -240,7 +240,7 @@ export class AgentV4Client {
     };
     const result = kind === 'conversation'
       ? await this.stub.resyncConversationV4({ ...common, sessionId, runtimePolicy: 'start-if-needed' })
-      : await this.stub.resyncSessionsIndexV4({ ...common, runtimePolicy: 'existing-only' });
+      : await this.stub.resyncSessionsIndexV4({ ...common, runtimePolicy: 'start-if-needed' });
     this.bindSubscription(kind, topic, result.ack);
     return result.ack;
   }

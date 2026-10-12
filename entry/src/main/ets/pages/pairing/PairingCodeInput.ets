@@ -15,7 +15,7 @@ import {
   parsePairLink,
   pemFromDerBase64
 } from 'connection';
-import { LightBloomButton, ZcodeColors } from 'uikit';
+import { hilog } from '@kit.PerformanceAnalysisKit';import { LightBloomButton, ZcodeColors } from 'uikit';
 
 /** 深链解析结果的展示摘要。 */
 interface ParsedSummary {
@@ -218,6 +218,7 @@ struct PairingCodeInput {
         params: session as object
       }).catch(() => {});
     } catch (error) {
+      hilog.warn(0x0000, 'PairingInput', 'connect failed: %{public}s', JSON.stringify(error, Object.getOwnPropertyNames(error)));
       const pinned = error instanceof PinnedHttpError ? error : new PinnedHttpError('ConnectFailed', String(error));
       this.formError = this.adviceFor(pinned);
     } finally {

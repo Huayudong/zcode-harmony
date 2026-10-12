@@ -3,6 +3,7 @@
 // 超过物理上限时只在 UTF-8 bytes 层分片，不改变 seq/apply 语义。
 import { PROTOCOL_V4_LIMITS, V4_WIRE_PROTOCOL_VERSION } from "./core.js";
 import { crc32WireBytes, encodeWireBytesBase64 } from "./wire-binary.js";
+import { utf8Encode } from "../rpc/Buffer.js";
 import type {
   TopicFrameDeliveryKind,
   TopicWireChecksum,
@@ -78,11 +79,11 @@ export function measureTopicNotificationEnvelopeBytes(wire: TopicWireFrameCandid
 }
 
 export function utf8JsonByteLength(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  return utf8Encode(JSON.stringify(value)).byteLength;
 }
 
 function encodeJson(value: unknown): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(value));
+  return utf8Encode(JSON.stringify(value));
 }
 
 export class TopicWireFrameEncodingError extends Error {

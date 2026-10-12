@@ -100,6 +100,15 @@ export class AssetTokenStore {
     const attributes: asset.AssetMap = new Map<asset.Tag, asset.Value>();
     attributes.set(asset.Tag.ALIAS, bytesFromText(tokenAlias(serverId)));
     attributes.set(asset.Tag.SECRET, bytesFromText(token));
+    // 重配对（换证书/换 server）时别名已存在，asset.add 抛"已存在"；实测部分版本
+    // asset.update 亦不可用，这里 remove→add：先删旧别名（不存在则忽略）再新增。
+    const query: asset.AssetMap = new Map<asset.Tag, asset.Value>();
+    query.set(asset.Tag.ALIAS, bytesFromText(tokenAlias(serverId)));
+    try {
+      await asset.remove(query);
+    } catch {
+      // 别名不存在：首次配对，直接走新增
+    }
     await asset.add(attributes);
   }
 

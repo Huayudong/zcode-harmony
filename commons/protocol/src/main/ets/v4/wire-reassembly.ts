@@ -3,6 +3,7 @@
 import { z } from "./zod-ambient";
 import { PROTOCOL_V4_LIMITS } from "./core.js";
 import { crc32WireBytes, decodeWireBase64 } from "./wire-binary.js";
+import { utf8Encode, utf8Decode } from "../rpc/Buffer.js";
 import type { TopicFrameDeliveryKind, TopicWireFrame } from "./wire.js";
 
 export type ReassembleTopicWireFramesResult<F> =
@@ -15,7 +16,7 @@ export type ReassembleTopicWireFramesResult<F> =
   | { kind: "rejected"; reasonCode: string };
 
 function encodeJson(value: unknown): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(value));
+  return utf8Encode(JSON.stringify(value));
 }
 
 function frameMatchesEnvelope(
@@ -178,7 +179,7 @@ export function reassembleTopicWireFrames<F>(
 
   let decoded: string;
   try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(logical);
+    decoded = utf8Decode(logical);
   } catch {
     return {
       kind: "rejected",

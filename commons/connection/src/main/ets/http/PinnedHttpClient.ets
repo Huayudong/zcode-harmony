@@ -61,7 +61,11 @@ interface JsonErrorBody {
 
 /** 传输层失败归一（超时/TLS 握手/连接失败），供 HTTP 与 WSS 两路共用语义。 */
 export function mapRequestFailure(error: Object): PinnedHttpError {
-  const message = error instanceof Error ? error.message : String(error);
+  const rawDump = error instanceof Error
+    ? error.message
+    : JSON.stringify(error, Object.getOwnPropertyNames(error));
+  console.warn('ZCodeHttp raw failure: ' + rawDump);
+  const message = rawDump;
   const lowered = message.toLowerCase();
   if (lowered.includes('timeout') || lowered.includes('timed out')) {
     return new PinnedHttpError('Timeout', message);
@@ -85,7 +89,7 @@ export class PinnedHttpClient {
    * bearerToken 为空串时不带 Authorization 头。
    */
   async jsonRequest<T>(target: PinnedHttpTarget, method: http.RequestMethod, path: string,
-    body: object | null, bearerToken: string, timeoutMs: number = 8000): Promise<T> {
+    body: object | null, bearerToken: string, timeoutMs: number = 60000): Promise<T> {
     let caPath: string | undefined = undefined;
     if (target.caPem.length > 0) {
       caPath = await ensureCaFileWritten(this.filesDir, target.caPem);
@@ -109,6 +113,7 @@ export class PinnedHttpClient {
         connectTimeout: timeoutMs,
         readTimeout: timeoutMs,
         caPath: caPath,
+        usingProxy: false, // 自托管固定 CA 直连，绝不经系统代理（代理会破坏指纹校验与局域网直连）
       });
       if (response.responseCode < 200 || response.responseCode >= 300) {
         let serverMessage = '';

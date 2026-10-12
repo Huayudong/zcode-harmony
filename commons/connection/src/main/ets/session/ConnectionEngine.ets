@@ -77,6 +77,8 @@ export type CommandType = 'sendText' | 'stop' | 'resolveInteraction' | 'renameSe
   | 'createSession' | 'deleteSession' | 'retryTurn';
 
 const BACKOFF_SCHEDULE_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
+/** WS connect（TCP+TLS+升级）限时：对端静默时握手可能永不返回，限时后走退避。 */
+const CONNECT_TIMEOUT_MS = 15000;
 
 export class ConnectionEngine {
   private readonly options: EngineOptions;
@@ -174,6 +176,22 @@ export class ConnectionEngine {
     }
   }
 
+  /** 给无内建超时的 await 加上限；超时抛错走调用方 catch。 */
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return new Promise<T>((resolve: (value: T) => void, reject: (e: Error) => void) => {
+      const timer = setTimeout(() => {
+        reject(new Error(message));
+      }, timeoutMs);
+      promise.then((value: T) => {
+        clearTimeout(timer);
+        resolve(value);
+      }, (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+  }
+
   private setState(state: ConnectionState, detail: string): void {
     this.state = state;
     const event: ConnectionStateEvent = { state: state, detail: detail };
@@ -212,14 +230,36 @@ export class ConnectionEngine {
     let transport: WebSocketTransport | null = null;
     try {
       transport = new WebSocketTransport();
+      // 断线感知：socket 层 close/error/心跳超时 → 断线处理。
+      // online 态 → handleDrop（teardown + 退避重连）；connecting 态 → 仅 teardown
+      //（握手中的 RPC fail-closed reject → 本函数 catch 单次退避；ChannelClient 只在
+      // dispose 时 reject 挂起请求，不 teardown 会让 connectNow 永久挂在死 socket 上）。
+      // 守卫：仅当前连接实例（旧连接迟到事件、stop() 的 dispose 不触发）。
+      transport.onEnd(() => {
+        if (this.transport !== transport) {
+          return;
+        }
+        if (this.state === 'online') {
+          this.handleDrop('socket 断开');
+        } else if (this.state === 'connecting') {
+          this.teardownTransport();
+        }
+      });
       // 先订阅 dataEmitter 再 connect：服务端在握手完成后立即下发 Initialize 帧，
       // 若 connect resolve 后才挂监听会错过该帧 → ChannelClient 永远 Uninitialized（死锁）。
       const protocol = new SocketProtocol(transport);
-      await transport.connect(this.options.target_http, this.options.bearerToken, this.options.caFilePath);
-      const client = await AgentV4Client.connect(protocol, this.options.target, {
+      // connect() 自身必须限时：对端静默（进程挂起/半开）时 WS 握手可能永不返回，
+      // 而心跳在 connect resolve 后才启动，罩不住这一段；超时走 catch 统一退避。
+      await this.withTimeout(transport.connect(this.options.target_http, this.options.bearerToken,
+        this.options.caFilePath), CONNECT_TIMEOUT_MS, 'WSS 连接超时');
+      // v4 握手（hello/initialize）同样限时：挂起的 hello 只能被 ChannelClient.dispose
+      // reject，而该实例此刻还只在局部变量里，connecting 期的 teardown 够不到它；
+      // 不限时会让 connectNow 永久悬挂、退避循环死亡。（超时后该 Client 实例泄漏一次，
+      // 待协议层支持取消后收敛。）
+      const client = await this.withTimeout(AgentV4Client.connect(protocol, this.options.target, {
         clientId: this.options.clientId,
         appVersion: this.options.appVersion,
-      });
+      }), CONNECT_TIMEOUT_MS, 'v4 握手超时');
 
       this.transport = transport;
       this.client = client;

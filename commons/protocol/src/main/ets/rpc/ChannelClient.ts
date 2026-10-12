@@ -199,11 +199,20 @@ export class ChannelClient implements IChannelClient, IDisposable {
     arg?: object | null,
   ): void {
     const writer = new BufferWriter();
-    serialize(writer, [type, id, channelName, name]);
-    serialize(writer, arg);
+    console.info('ZCodeCC sendRequest id=' + String(id) + ' ch=' + String(channelName) + ' fn=' + String(name));
     try {
+      serialize(writer, [type, id, channelName, name]);
+      serialize(writer, arg);
+      console.info('ZCodeCC ser ok len=' + String(writer.buffer.byteLength));
+    } catch (se) {
+      console.info('ZCodeCC SER ERR ' + String(se) + ' stack=' + String((se as Error)?.stack ?? '-'));
+    }
+    try {
+      console.info('ZCodeCC proto.send before len=' + String(writer.buffer.byteLength));
       this.protocol.send(writer.buffer);
-    } catch {
+      console.info('ZCodeCC proto.send ok');
+    } catch (e) {
+      console.info('ZCodeCC proto.send ERR ' + String(e));
       /* 发送失败等 socket close 事件兜底 */
     }
   }
@@ -216,8 +225,11 @@ export class ChannelClient implements IChannelClient, IDisposable {
     serialize(writer, [type, id]);
     serialize(writer, undefined);
     try {
+      console.info('ZCodeCC proto.send before len=' + String(writer.buffer.byteLength));
       this.protocol.send(writer.buffer);
-    } catch {
+      console.info('ZCodeCC proto.send ok');
+    } catch (e) {
+      console.info('ZCodeCC proto.send ERR ' + String(e));
       /* 发送失败等 socket close 事件兜底 */
     }
   }
@@ -227,6 +239,7 @@ export class ChannelClient implements IChannelClient, IDisposable {
     const header = deserialize(reader) as unknown[];
     const body = deserialize(reader) as object | null;
     const type = header[0] as ResponseType;
+    console.info('ZCodeCC onBuffer type=' + String(type) + ' isArray=' + String(Array.isArray(header)) + ' state=' + String(this.state));
 
     switch (type) {
       case ResponseType.Initialize:
@@ -246,6 +259,7 @@ export class ChannelClient implements IChannelClient, IDisposable {
   }
 
   private onResponse(response: IRawResponse): void {
+    console.info('ZCodeCC onResponse type=' + String(response.type) + ' state=' + String(this.state));
     if (response.type === ResponseType.Initialize) {
       this.state = ClientState.Idle;
       this._onDidInitialize.fire();

@@ -38,7 +38,7 @@ import {
   type WorkspaceTarget,
 } from 'protocol';
 import { AssetTokenStore, ProfileStore, type ConnectionProfile } from '../profile/ConnectionProfile';
-import { PinnedHttpClient, PinnedHttpTarget, caFilePathIn } from '../http/PinnedHttpClient';
+import { PinnedHttpClient, PinnedHttpError, PinnedHttpTarget, caFilePathIn } from '../http/PinnedHttpClient';
 import { fetchServerInfo, type ServerInfoCheck } from '../pairing/PairingClient';
 import {
   ConnectionEngine,
@@ -372,7 +372,10 @@ export class WorkbenchController {
       const target: PinnedHttpTarget = { host: profile.host, port: profile.port, caPem: caPem };
       info = await fetchServerInfo(client, target, token, profile.certFingerprint);
     } catch (error) {
-      hilog.warn(DOMAIN, TAG, 'server-info failed: %{public}s', String(error));
+      hilog.warn(DOMAIN, TAG, 'server-info failed: %{public}s', String(error));      const pinned = error instanceof PinnedHttpError ? error : null;
+      hilog.warn(DOMAIN, TAG, 'server-info failed: %{public}s kind=%{public}s status=%{public}d',
+        String(error instanceof Error ? error.message : error), pinned ? pinned.kind : '-',
+        pinned && pinned.statusCode !== undefined ? pinned.statusCode : -1);
       this.startupFailure = 'unreachable';
       this.currentState = { state: 'offline', detail: '连不上电脑，检查网络后重试' };
       this.stateEmitter.fire(this.currentState);

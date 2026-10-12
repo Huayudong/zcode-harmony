@@ -1,4 +1,5 @@
 /// <reference path="./globals.d.ts" />
+import util from '@ohos.util';
 /**
  * Layer 0 基础设施：VSBuffer（@zcode/rpc buffer.ts 的鸿蒙移植）。
  * 移植原则：逐行为对齐原实现，编码字节必须与原包一致（一致性测试门禁）。
@@ -26,8 +27,7 @@ export class VSBuffer {
 
   /** 从字符串创建 buffer (UTF-8) */
   public static fromString(str: string): VSBuffer {
-    const encoder = new TextEncoder();
-    return new VSBuffer(encoder.encode(str));
+    return new VSBuffer(utf8Encode(str));
   }
 
   /** 拼接多个 buffer */
@@ -44,8 +44,7 @@ export class VSBuffer {
 
   /** 转为 UTF-8 字符串 */
   public toString(): string {
-    const decoder = new TextDecoder();
-    return decoder.decode(this.buffer);
+    return utf8Decode(this.buffer);
   }
 
   /** 切片 */
@@ -83,4 +82,16 @@ export class VSBuffer {
     this.buffer[offset + 2] = (value >>> 8) & 0xff;
     this.buffer[offset + 3] = value & 0xff;
   }
+}
+
+/** ArkTS 杩愯鏃舵棤 Web TextEncoder/TextDecoder锛岀粺涓€璧?@ohos.util銆?*/
+export function utf8Encode(str: string): Uint8Array {
+  const encoder = new util.TextEncoder();
+  const dest = new Uint8Array(str.length * 4);
+  const res = encoder.encodeInto(str, dest);
+  return dest.subarray(0, res.written);
+}
+
+export function utf8Decode(bytes: Uint8Array): string {
+  return util.TextDecoder.create('utf-8').decodeToString(bytes);
 }
