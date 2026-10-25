@@ -233,17 +233,18 @@ test('批准链路：pendingInteractions 投影、state.updated 坍缩、resolve
   assert.equal(pending[0].kind, 'permission');
   assert.equal(pending[0].toolName, 'Bash');
   assert.equal(pending[0].title, '运行 npm test');
+  // 批次21：选项视图补 scopes/description（permission scopes / userInput 题面说明）
   assert.deepEqual(pending[0].options, [
-    { optionId: 'allow_once', label: '允许一次', kind: 'allowOnce' },
-    { optionId: 'deny', label: '拒绝', kind: 'deny' },
+    { optionId: 'allow_once', label: '允许一次', kind: 'allowOnce', scopes: [], description: '' },
+    { optionId: 'deny', label: '拒绝', kind: 'deny', scopes: [], description: '' },
   ]);
   // userInput 单问题：prompt + 顶层 options
   assert.equal(pending[1].kind, 'userInput');
   assert.equal(pending[1].title, '选择协作模式');
-  assert.deepEqual(pending[1].options, [{ optionId: 'plan', label: 'Plan 模式', kind: '' }]);
+  assert.deepEqual(pending[1].options, [{ optionId: 'plan', label: 'Plan 模式', kind: '', scopes: [], description: '' }]);
   // AskUserQuestion 多问题：取当前问题与其选项；freeText/sensitive 透出
   assert.equal(pending[2].title, '使用哪个模型？');
-  assert.deepEqual(pending[2].options, [{ optionId: 'glm', label: 'GLM', kind: '' }]);
+  assert.deepEqual(pending[2].options, [{ optionId: 'glm', label: 'GLM', kind: '', scopes: [], description: '' }]);
   assert.equal(pending[2].freeText, true);
   assert.equal(pending[2].sensitive, true);
 

@@ -14,6 +14,7 @@ import {
   helloMessageSchema,
   sessionsIndexTopicFrameSchema,
   conversationTopicFrameSchema,
+  workspaceConfigTopicFrameSchema,
   v4ConversationFileChangesResultSchema,
   v4AttachmentBeginResultSchema,
   v4AttachmentChunkResultSchema,
@@ -28,15 +29,17 @@ import type { TopicWireFrameCandidate } from './wire.js';
 import { commandAckSchema, commandEnvelopeSchema, type CommandAck, type CommandEnvelope } from './command.js';
 import {
   ZCodeAgentStub,
+  UsageStatsStub,
   ZCODE_AGENT_CHANNEL,
   FILE_CHANNEL,
+  USAGE_STATS_CHANNEL,
   WorkspaceFileStub,
   type SubscribeBase,
   type WorkspaceTarget,
 } from './AgentV4Stub.js';
 
 export { ZCODE_AGENT_CHANNEL } from './AgentV4Stub.js';
-export { FILE_CHANNEL, WorkspaceFileStub } from './AgentV4Stub.js';
+export { FILE_CHANNEL, USAGE_STATS_CHANNEL, WorkspaceFileStub, UsageStatsStub } from './AgentV4Stub.js';
 export type { WorkspaceTarget, SubscribeBase, WorkspaceFileSearchParams } from './AgentV4Stub.js';
 
 export interface AgentV4ConnectOptions {
@@ -45,7 +48,10 @@ export interface AgentV4ConnectOptions {
   appVersion: string;
 }
 
-export type TopicKind = 'sessions-index' | 'conversation';
+export type TopicKind = 'sessions-index' | 'conversation' | 'workspace-config';
+
+/** workspace-config 的订阅键（真实 topic 是 workspace-config/<workspaceId>，帧到达后按前缀归位）。 */
+const WORKSPACE_CONFIG_TOPIC_KEY = 'workspace-config:*';
 
 export interface SubscriptionWatermark {
   topic: string;
@@ -86,6 +92,9 @@ function topicOf(kind: TopicKind, target: WorkspaceTarget, sessionId?: string): 
   if (kind === 'conversation') {
     return `conversation/${sessionId ?? ''}`;
   }
+  if (kind === 'workspace-config') {
+    return WORKSPACE_CONFIG_TOPIC_KEY;
+  }
   return `sessions-index/${target.workspaceIdentity?.trim() || target.workspacePath}`;
 }
 
@@ -93,6 +102,7 @@ export class AgentV4Client {
   readonly hello: HelloMessage;
   private readonly stub: ZCodeAgentStub;
   private readonly fileStub: WorkspaceFileStub;
+  private readonly usageStatsStub: UsageStatsStub;
   private readonly channelClient: ChannelClient;
   private readonly target: WorkspaceTarget;
   private readonly sessionsIndexAssembler = new TopicWireFrameAssembler<SessionsIndexTopicFrame>(
@@ -100,6 +110,9 @@ export class AgentV4Client {
   );
   private readonly conversationAssembler = new TopicWireFrameAssembler<ConversationTopicFrame>(
     conversationTopicFrameSchema,
+  );
+  private readonly workspaceConfigAssembler = new TopicWireFrameAssembler<object>(
+    workspaceConfigTopicFrameSchema,
   );
   /** key = subscriptionId；orphan 缓冲 key = "orphan:<topic>"。 */
   private readonly subs = new Map<string, SubState>();
@@ -117,6 +130,7 @@ export class AgentV4Client {
     this.channelClient = channelClient;
     this.stub = stub;
     this.fileStub = new WorkspaceFileStub(channelClient.getChannel(FILE_CHANNEL));
+    this.usageStatsStub = new UsageStatsStub(channelClient.getChannel(USAGE_STATS_CHANNEL));
     this.hello = hello;
     this.target = target;
   }
@@ -140,10 +154,11 @@ export class AgentV4Client {
       capabilities: { workspaceHookReviewUi: true },
     });
     const client = new AgentV4Client(channelClient, stub, hello, target);
-    // workspace 级帧流订阅（两条通知面，按 topic 前缀分流）
+    // workspace 级帧流订阅（三条通知面，按 topic 前缀分流）
     client.upstreamEvents.push(
       client.stub.onDynamicSessionsIndexFrame(target)((wire: unknown) => client.acceptWire('sessions-index', wire)),
       client.stub.onDynamicConversationFrame(target)((wire: unknown) => client.acceptWire('conversation', wire)),
+      client.stub.onDynamicWorkspaceConfigFrame(target)((wire: unknown) => client.acceptWire('workspace-config', wire)),
     );
     return client;
   }
@@ -215,6 +230,20 @@ export class AgentV4Client {
     return result.ack;
   }
 
+  /** 订阅 workspace-config（模型/模式/档位目录；批次21）。 */
+  async subscribeWorkspaceConfig(params?: {
+    visibility?: 'foreground' | 'background';
+  }): Promise<{ subscriptionId: string; mode: 'snapshot' | 'resume'; logEpoch: string }> {
+    const result = await this.stub.subscribeWorkspaceConfigV4({
+      workspacePath: this.target.workspacePath,
+      ...(this.target.workspaceIdentity ? { workspaceIdentity: this.target.workspaceIdentity } : {}),
+      runtimePolicy: 'start-if-needed',
+      ...(params?.visibility ? { visibility: params.visibility } : {}),
+    });
+    this.bindSubscription('workspace-config', WORKSPACE_CONFIG_TOPIC_KEY, result.ack);
+    return result.ack;
+  }
+
   /**
    * same-sub 恢复（断线重连后调用）。
    * base=null 或 forceSnapshot=true 时服务端回全量快照，本地水位由帧流水线重建。
@@ -230,7 +259,7 @@ export class AgentV4Client {
     if (sub) {
       sub.buffered = [];
     }
-    const topic = sub ? sub.topic : topicOf('sessions-index', this.target);
+    const topic = sub ? sub.topic : topicOf(kind, this.target);
     const common = {
       workspacePath: this.target.workspacePath,
       ...(this.target.workspaceIdentity ? { workspaceIdentity: this.target.workspaceIdentity } : {}),
@@ -240,7 +269,9 @@ export class AgentV4Client {
     };
     const result = kind === 'conversation'
       ? await this.stub.resyncConversationV4({ ...common, sessionId, runtimePolicy: 'start-if-needed' })
-      : await this.stub.resyncSessionsIndexV4({ ...common, runtimePolicy: 'start-if-needed' });
+      : (kind === 'workspace-config'
+        ? await this.stub.resyncWorkspaceConfigV4({ ...common, runtimePolicy: 'start-if-needed' })
+        : await this.stub.resyncSessionsIndexV4({ ...common, runtimePolicy: 'start-if-needed' }));
     this.bindSubscription(kind, topic, result.ack);
     return result.ack;
   }
@@ -282,6 +313,12 @@ export class AgentV4Client {
       ...(this.target.workspaceIdentity ? { workspaceIdentity: this.target.workspaceIdentity } : {}),
       ...params,
     });
+  }
+
+  // ── 用量/套餐余额（usage-stats 通道；需在线，直连 RPC 不走命令队列）──
+
+  getEntitlementSnapshot(params: object): Promise<object> {
+    return this.usageStatsStub.getEntitlementSnapshot(params);
   }
 
   // ── 附件分块上传（connectionId 自动取 hello；结果过 schema 校验）──
@@ -389,7 +426,9 @@ export class AgentV4Client {
       return;
     }
     const topic: string = candidate.topic;
-    const assembler = kind === 'conversation' ? this.conversationAssembler : this.sessionsIndexAssembler;
+    const assembler = kind === 'conversation'
+      ? this.conversationAssembler
+      : (kind === 'workspace-config' ? this.workspaceConfigAssembler : this.sessionsIndexAssembler);
     let events: TopicWireAssemblyEvent<V4TopicFrame>[];
     try {
       events = assembler.accept(candidate);
@@ -452,5 +491,10 @@ export class AgentV4Client {
 }
 
 function isTopicOf(kind: TopicKind, topic: string, frame: V4TopicFrame): boolean {
-  return frame.topic === topic || (kind === 'conversation' ? topic.startsWith('conversation/') : topic.startsWith('sessions-index/'));
+  if (kind === 'workspace-config') {
+    // 订阅键是通配（workspace-config:*），帧按真实 topic 前缀归位
+    return frame.topic.startsWith('workspace-config/');
+  }
+  return frame.topic === topic
+    || (kind === 'conversation' ? topic.startsWith('conversation/') : topic.startsWith('sessions-index/'));
 }

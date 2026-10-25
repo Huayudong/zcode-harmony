@@ -26,12 +26,17 @@ import {
   Emitter,
   PROTOCOL_V4_LIMITS,
   SessionsIndexModel,
+  WorkspaceConfigModel,
+  parseEntitlementSnapshot,
   parseFileChangesResult,
+  type ConfigOptionView,
   type ConversationRowView,
   type Event,
   type FileChangesReportView,
   type PendingInteractionView,
+  type SessionConfigView,
   type SessionSummaryView,
+  type UsageEntitlementView,
   type V4Fault,
   type V4TopicFrame,
   type WorkbenchFrameLike,
@@ -60,13 +65,15 @@ const CONVERSATION_FLUSH_DEBOUNCE_MS: number = 1500;
 /** 连接三要素之一不可用时的停机态详情（UI 据此给重试/重新配对入口）。 */
 type StartupFailure = 'no-profile' | 'no-token' | 'unreachable' | 'no-workspace';
 
-/** 会话页可观察的对话面（行视图 + 标题 + 是否有流式工作 + 待批交互）。 */
+/** 会话页可观察的对话面（行视图 + 标题 + 是否有流式工作 + 待批交互 + 会话配置）。 */
 export interface ConversationUpdate {
   sessionId: string;
   rows: ConversationRowView[];
   hasLiveWork: boolean;
   title: string;
   pending: PendingInteractionView[];
+  /** 会话级当前配置（模式/模型/档位；null = 旧快照无 config 面）。 */
+  config: SessionConfigView | null;
 }
 
 interface SendTextPayload {
@@ -171,6 +178,22 @@ interface RenameSessionPayload {
   title: string;
 }
 
+/** switchCollaborationMode：词表 build/edit/plan/yolo（auto 非用户可切）。 */
+interface SwitchModePayload {
+  mode: string;
+}
+
+/** switchModelConfig：三元组整体提交（provider 由 workspace-config 目录的候选携带）。 */
+interface SwitchModelPayload {
+  provider: string;
+  model: string;
+  thought: string;
+}
+
+/** usage-stats 通道的空请求体（getEntitlementSnapshot 无入参面）。 */
+interface UsageEntitlementQuery {
+}
+
 interface CreateSessionPayload {
   workspaceId: string;
 }
@@ -222,11 +245,13 @@ export class WorkbenchController {
   private readonly conversationEmitter = new Emitter<ConversationUpdate>();
   private readonly faultEmitter = new Emitter<V4Fault>();
   private readonly attachmentEmitter = new Emitter<AttachmentUpdate>();
+  private readonly configEmitter = new Emitter<ConfigOptionView[]>();
 
   private profile: ConnectionProfile | null = null;
   private engine: ConnectionEngine | null = null;
   private cache: SessionCache | null = null;
   private readonly sessionsModel = new SessionsIndexModel();
+  private readonly configModel = new WorkspaceConfigModel();
   private readonly conversationModels = new Map<string, ConversationModel>();
   private readonly attachmentsBySession = new Map<string, AttachmentItem[]>();
   private readonly notifiedInteractions = new Set<string>();
@@ -239,6 +264,7 @@ export class WorkbenchController {
   private readonly conversationFireTimers = new Map<string, number>();
   private readonly pendingConversationFire = new Set<string>();
   private sessionsIndexPending = true;
+  private workspaceConfigPending = true;
 
   private currentState: ConnectionStateEvent = { state: 'offline', detail: '尚未连接' };
   private serverName: string = '';
@@ -269,6 +295,11 @@ export class WorkbenchController {
 
   get onAttachmentChanged(): Event<AttachmentUpdate> {
     return this.attachmentEmitter.event;
+  }
+
+  /** workspace-config 目录变化（模型/模式/档位候选；空数组 = 目录未就绪）。 */
+  get onConfigChanged(): Event<ConfigOptionView[]> {
+    return this.configEmitter.event;
   }
 
   // ── 查询面 ──
@@ -494,6 +525,13 @@ export class WorkbenchController {
         // 保持 pending；下一个 online 事件（重连）再试
       });
     }
+    if (this.workspaceConfigPending) {
+      engine.subscribeWorkspaceConfig().then((): void => {
+        this.workspaceConfigPending = false;
+      }).catch((): void => {
+        // 同上：目录拿不到时切换面板降级为只读当前值
+      });
+    }
     const pending: string[] = [];
     this.pendingConversations.forEach((sessionId: string) => {
       pending.push(sessionId);
@@ -550,6 +588,12 @@ export class WorkbenchController {
         }
         this.fireSessions();
         this.notifyPhaseTransitions();
+      }
+      return;
+    }
+    if (frame.topic.startsWith('workspace-config/')) {
+      if (this.configModel.applyFrame(frame)) {
+        this.configEmitter.fire(this.configModel.options());
       }
       return;
     }
@@ -986,6 +1030,56 @@ export class WorkbenchController {
     await engine.sendCommand(sessionId, 'renameSession', payload);
   }
 
+  // ── 会话级配置切换（批次21；CAS 命令——信封带快照 baseRevision，过期切换服务端按 stale 拒）──
+
+  /** 切协作模式（build/edit/plan/yolo）。当前值回流：conversation config.mode。 */
+  async switchCollaborationMode(sessionId: string, mode: string): Promise<void> {
+    const engine = this.engine;
+    const model = this.conversationModels.get(sessionId);
+    if (engine === null || model === undefined) {
+      throw new Error('会话快照未就绪，稍后再试');
+    }
+    const baseLogEpoch = model.logEpoch();
+    if (baseLogEpoch.length === 0) {
+      throw new Error('会话快照未就绪，稍后再试');
+    }
+    const payload: SwitchModePayload = { mode: mode };
+    await engine.sendCommand(sessionId, 'switchCollaborationMode', payload, model.revision(), baseLogEpoch);
+  }
+
+  /** 切模型/思考档位（三元组整体提交；候选来自 workspace-config 目录 model 项）。 */
+  async switchModelConfig(sessionId: string, provider: string, model: string, thought: string): Promise<void> {
+    const engine = this.engine;
+    const conversation = this.conversationModels.get(sessionId);
+    if (engine === null || conversation === undefined) {
+      throw new Error('会话快照未就绪，稍后再试');
+    }
+    const baseLogEpoch = conversation.logEpoch();
+    if (baseLogEpoch.length === 0) {
+      throw new Error('会话快照未就绪，稍后再试');
+    }
+    const payload: SwitchModelPayload = { provider: provider, model: model, thought: thought };
+    await engine.sendCommand(sessionId, 'switchModelConfig', payload, conversation.revision(), baseLogEpoch);
+  }
+
+  /** workspace-config 目录（模型/模式/档位候选；空数组 = 目录未就绪，UI 降级只读）。 */
+  getConfigOptions(): ConfigOptionView[] {
+    return this.configModel.options();
+  }
+
+  // ── 用量/套餐余额（usage-stats 通道；需在线，直连 RPC 不走命令队列）──
+
+  /** 套餐权益快照（剩余额度/重置时间/订阅身份；未登录时 unavailableReason 说明）。 */
+  async getUsageEntitlement(): Promise<UsageEntitlementView> {
+    const engine = this.engine;
+    if (engine === null) {
+      throw new Error('未连接');
+    }
+    const query: UsageEntitlementQuery = {};
+    const raw = await engine.getEntitlementSnapshot(query) as object | null;
+    return parseEntitlementSnapshot(raw);
+  }
+
   /** A9：按当前活跃档案重建连接链（切换档案/诊断重连共用）。 */
   async restart(): Promise<void> {
     if (this.engine !== null) {
@@ -996,6 +1090,7 @@ export class WorkbenchController {
     this.workspaceKey = '';
     this.hasLiveData = false;
     this.sessionsIndexPending = true;
+    this.workspaceConfigPending = true;
     this.startupFailure = null;
     this.currentState = { state: 'offline', detail: '正在重连' };
     this.stateEmitter.fire(this.currentState);
@@ -1035,6 +1130,7 @@ export class WorkbenchController {
       hasLiveWork: model.hasLiveWork(),
       title: model.title(),
       pending: model.pendingInteractions(),
+      config: model.sessionConfig(),
     };
     this.conversationEmitter.fire(update);
   }

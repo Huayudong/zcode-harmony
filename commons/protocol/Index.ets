@@ -44,6 +44,8 @@ export { ChannelClient } from './src/main/ets/rpc/ChannelClient';
 export {
   ZCODE_AGENT_CHANNEL,
   ZCodeAgentStub,
+  USAGE_STATS_CHANNEL,
+  UsageStatsStub,
   type WorkspaceTarget,
   type SubscribeBase
 } from './src/main/ets/v4/AgentV4Stub';
@@ -109,13 +111,33 @@ export { crc32WireBytes, encodeWireBytesBase64, decodeWireBase64 } from './src/m
 export {
   SessionsIndexModel,
   ConversationModel,
+  WorkspaceConfigModel,
   parseFileChangesResult,
   type SessionSummaryView,
   type ConversationRowView,
   type PendingInteractionView,
   type PendingInteractionOptionView,
+  type ApprovalContentView,
+  type ApprovalFileChangeView,
+  type SessionConfigView,
+  type ConfigOptionView,
+  type ConfigOptionValueView,
   type DiffHunkView,
   type FileChangeItemView,
   type FileChangesReportView,
   type WorkbenchFrameLike
 } from './src/main/ets/v4/WorkbenchModel';
+export {
+  deriveApprovalContent,
+  approvalOptionPriority,
+  approvalOptionLabel,
+  approvalOptionDescription,
+  approvalOptionScopes,
+  type ApprovalPreview,
+  type ApprovalBlockKind
+} from './src/main/ets/v4/approvalPreview';
+export {
+  parseEntitlementSnapshot,
+  type UsageEntitlementView,
+  type UsageQuotaLimitView
+} from './src/main/ets/v4/usageEntitlement';

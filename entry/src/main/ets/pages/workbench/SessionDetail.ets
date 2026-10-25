@@ -17,6 +17,9 @@ import {
 } from 'connection';
 import type { ConnectionStateEvent } from 'connection';
 import type {
+  ApprovalFileChangeView,
+  ConfigOptionView,
+  ConfigOptionValueView,
   ConversationRowView,
   DiffHunkView,
   FileChangeItemView,
@@ -24,8 +27,12 @@ import type {
   IDisposable,
   PendingInteractionView,
   PendingInteractionOptionView,
+  SessionConfigView,
+  UsageEntitlementView,
+  UsageQuotaLimitView,
 } from 'protocol';
-import { ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import { approvalOptionDescription, approvalOptionLabel } from 'protocol';
+import { ZcodeColors, StatusDot, StatusTone, ZIcon, ZIconName } from 'uikit';
 import { mdBlockKey, parseMarkdownBlocks, type MdBlock, type MdSpan } from 'utils';
 
 /** 会话列表 → 会话页的路由参数（与 SessionList 侧同构）。 */
@@ -57,7 +64,6 @@ struct SessionDetail {
   @State resolvingId: string = '';
   @State pendingFreeText: string = '';
   @State inputFocused: boolean = false;
-  @State sendMode: string = 'build';
   @State stopArmed: boolean = false;
   @State activeTab: number = 0;
   @State turns: ConversationRowView[] = [];
@@ -80,6 +86,15 @@ struct SessionDetail {
   @State atBottom: boolean = true;
   @State timelineExpanded: boolean = false;
   @State timeline: ConversationRowView[] = [];
+  // ── 批次21：会话配置（模式/模型/档位）与用量面板 ──
+  @State sessionConfig: SessionConfigView | null = null;
+  @State configOptions: ConfigOptionView[] = [];
+  @State configPanelOpen: boolean = false;
+  @State usagePanelOpen: boolean = false;
+  @State usage: UsageEntitlementView | null = null;
+  @State usageLoading: boolean = false;
+  @State switchBusy: boolean = false;
+  @State switchHint: string = '';
   private atSearchTimer: number = -1;
   private listScroller: Scroller = new Scroller();
   private blocksByRow: Map<number, MdBlock[]> = new Map();
@@ -126,6 +141,7 @@ struct SessionDetail {
       this.rows = update.rows;
       this.hasLiveWork = update.hasLiveWork;
       this.pending = update.pending;
+      this.sessionConfig = update.config;
       if (this.resolvingId.length > 0
         && update.pending.findIndex((item: PendingInteractionView) => item.interactionId === this.resolvingId) < 0) {
         this.resolvingId = '';
@@ -146,6 +162,11 @@ struct SessionDetail {
       if (update.sessionId === this.sessionId) {
         this.attachments = update.items;
       }
+    }));
+    // workspace-config 目录（模型/档位候选；空数组 = 未就绪，配置面板降级只读）
+    this.configOptions = controller.getConfigOptions();
+    this.disposables.push(controller.onConfigChanged((options: ConfigOptionView[]) => {
+      this.configOptions = options;
     }));
     if (this.sessionId.length > 0) {
       this.rows = await controller.openSession(this.sessionId);
@@ -430,7 +451,8 @@ struct SessionDetail {
     this.sending = true;
     this.sendHint = '';
     try {
-      await this.controller.sendText(this.sessionId, text, this.sendMode, this.attachments);
+      // 批次21起模式为会话级状态（switchCollaborationMode 切换），发送不再带按次模式
+      await this.controller.sendText(this.sessionId, text, '', this.attachments);
       this.inputText = '';
       this.stopArmed = false;
       void this.persistDraft();
@@ -699,17 +721,407 @@ struct SessionDetail {
 
   // ── Builders ──
 
+  // ── 批次21：会话配置（模式/模型/档位）与用量 ──
+
+  /** 当前会话模式（快照 config.mode；未就绪回退 build 显示）。 */
+  private currentMode(): string {
+    return this.sessionConfig !== null && this.sessionConfig.mode.length > 0 ? this.sessionConfig.mode : 'build';
+  }
+
+  private modeLabel(mode: string): string {
+    if (mode === 'build') {
+      return 'Agent';
+    }
+    if (mode === 'edit') {
+      return '编辑';
+    }
+    if (mode === 'plan') {
+      return '问答';
+    }
+    if (mode === 'yolo') {
+      return '自动';
+    }
+    return mode;
+  }
+
+  /** 会话级模式切换（switchCollaborationMode 幂等命令；当前值经快照 config 回流确认）。 */
+  private async doSwitchMode(mode: string): Promise<void> {
+    if (this.controller === null || this.sessionId.length === 0 || this.switchBusy || mode === this.currentMode()) {
+      return;
+    }
+    this.switchBusy = true;
+    this.switchHint = '';
+    try {
+      await this.controller.switchCollaborationMode(this.sessionId, mode);
+      this.switchHint = '';
+    } catch (error) {
+      this.switchHint = `模式切换失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.switchBusy = false;
+  }
+
+  /** workspace-config 目录里的模型候选（id=model 项；目录未就绪 = 空数组）。 */
+  private modelValues(): ConfigOptionValueView[] {
+    for (const option of this.configOptions) {
+      if (option.id === 'model') {
+        return option.values;
+      }
+    }
+    return [];
+  }
+
+  /** 当前模型对应的思考档位候选（目录优先，回退快照 thoughtLevels）。 */
+  private thoughtLevelCandidates(): string[] {
+    const model = this.sessionConfig !== null ? this.sessionConfig.model : '';
+    for (const value of this.modelValues()) {
+      if (value.value === model && value.thoughtLevels.length > 0) {
+        return value.thoughtLevels;
+      }
+    }
+    return this.sessionConfig !== null ? this.sessionConfig.thoughtLevels : [];
+  }
+
+  /** 模型/档位切换（三元组整体提交；provider 取目录候选携带的 providerId）。 */
+  private async doSwitchModel(provider: string, model: string, thought: string): Promise<void> {
+    if (this.controller === null || this.sessionId.length === 0 || this.switchBusy) {
+      return;
+    }
+    this.switchBusy = true;
+    this.switchHint = '';
+    try {
+      await this.controller.switchModelConfig(this.sessionId, provider, model, thought);
+    } catch (error) {
+      this.switchHint = `切换失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.switchBusy = false;
+  }
+
+  private async refreshUsage(): Promise<void> {
+    if (this.controller === null || this.usageLoading) {
+      return;
+    }
+    this.usageLoading = true;
+    try {
+      this.usage = await this.controller.getUsageEntitlement();
+    } catch (error) {
+      this.switchHint = `用量获取失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+    this.usageLoading = false;
+  }
+
+  private toggleConfigPanel(): void {
+    this.configPanelOpen = !this.configPanelOpen;
+    if (this.configPanelOpen) {
+      this.usagePanelOpen = false;
+    }
+  }
+
+  private toggleUsagePanel(): void {
+    this.usagePanelOpen = !this.usagePanelOpen;
+    if (this.usagePanelOpen) {
+      this.configPanelOpen = false;
+      void this.refreshUsage();
+    }
+  }
+
+  private formatResetTime(ms: number): string {
+    if (ms <= 0) {
+      return '';
+    }
+    const date = new Date(ms);
+    const month = date.getMonth() + 1 < 10 ? `0${date.getMonth() + 1}` : `${date.getMonth() + 1}`;
+    const day = date.getDate() < 10 ? `0${date.getDate()}` : `${date.getDate()}`;
+    const hour = date.getHours() < 10 ? `0${date.getHours()}` : `${date.getHours()}`;
+    const minute = date.getMinutes() < 10 ? `0${date.getMinutes()}` : `${date.getMinutes()}`;
+    return `${month}-${day} ${hour}:${minute}`;
+  }
+
+  private usageReasonText(reason: string): string {
+    if (reason === 'not_authenticated') {
+      return '未登录账号，无法获取套餐用量';
+    }
+    if (reason === 'not_configured') {
+      return '未配置模型供应商，无法获取用量';
+    }
+    if (reason === 'no_plan') {
+      return '当前账号没有订阅套餐';
+    }
+    return '暂不可用';
+  }
+
   @Builder
   ModeChip(label: string, value: string) {
     Text(label)
       .fontSize(12)
-      .fontColor(this.sendMode === value ? '#FFFFFF' : ZcodeColors.textSecondary())
-      .backgroundColor(this.sendMode === value ? ZcodeColors.BRAND : Color.Transparent)
+      .fontColor(this.currentMode() === value ? '#FFFFFF' : ZcodeColors.textSecondary())
+      .backgroundColor(this.currentMode() === value ? ZcodeColors.BRAND : Color.Transparent)
       .padding({ left: 12, right: 12, top: 4, bottom: 4 })
       .borderRadius(999)
+      .opacity(this.switchBusy ? 0.5 : 1)
       .onClick(() => {
-        this.sendMode = value;
+        void this.doSwitchMode(value);
       })
+  }
+
+  /** 批次21：会话配置面板（模式/模型/思考档位；目录未就绪时降级只读当前值）。 */
+  @Builder
+  ConfigPanel() {
+    Column({ space: 10 }) {
+      Row({ space: 8 }) {
+        ZIcon({ name: ZIconName.Mode, iconSize: 16, color: ZcodeColors.textSecondary() })
+        Text('会话配置')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(ZcodeColors.textPrimary())
+        Blank()
+        ZIcon({ name: ZIconName.Close, iconSize: 16, color: ZcodeColors.textTertiary() })
+          .onClick(() => {
+            this.configPanelOpen = false;
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      // 模式（会话级词表）
+      Row({ space: 6 }) {
+        this.ModeChip('Agent', 'build')
+        this.ModeChip('问答', 'plan')
+        this.ModeChip('编辑', 'edit')
+        this.ModeChip('自动', 'yolo')
+      }
+      .width('100%')
+
+      if (this.switchHint.length > 0) {
+        Text(this.switchHint)
+          .fontSize(11)
+          .fontColor(ZcodeColors.WARNING)
+          .width('100%')
+      }
+
+      // 模型目录
+      if (this.modelValues().length > 0) {
+        Text('模型')
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+          .width('100%')
+        Scroll() {
+          Column({ space: 6 }) {
+            ForEach(this.modelValues(), (value: ConfigOptionValueView) => {
+              Row({ space: 8 }) {
+                Column({ space: 1 }) {
+                  Text(value.name.length > 0 ? value.name : value.value)
+                    .fontSize(13)
+                    .fontColor(this.sessionConfig !== null && this.sessionConfig.model === value.value
+                      ? ZcodeColors.textPrimary() : ZcodeColors.textSecondary())
+                    .fontWeight(this.sessionConfig !== null && this.sessionConfig.model === value.value
+                      ? FontWeight.Medium : FontWeight.Normal)
+                    .maxLines(1)
+                    .layoutWeight(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  if (value.providerName.length > 0) {
+                    Text(value.providerName)
+                      .fontSize(10)
+                      .fontColor(ZcodeColors.textTertiary())
+                  }
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+                if (this.sessionConfig !== null && this.sessionConfig.model === value.value) {
+                  ZIcon({ name: ZIconName.Checkmark, iconSize: 14, color: ZcodeColors.SUCCESS })
+                }
+              }
+              .width('100%')
+              .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+              .borderRadius(10)
+              .backgroundColor(this.sessionConfig !== null && this.sessionConfig.model === value.value
+                ? ZcodeColors.SURFACE : Color.Transparent)
+              .opacity(this.switchBusy ? 0.5 : 1)
+              .onClick(() => {
+                const provider = value.providerId.length > 0
+                  ? value.providerId
+                  : (this.sessionConfig !== null ? this.sessionConfig.provider : '');
+                const thought = value.defaultThoughtLevel.length > 0
+                  ? value.defaultThoughtLevel
+                  : (value.thoughtLevels.length > 0 ? value.thoughtLevels[0] : '');
+                void this.doSwitchModel(provider, value.value, thought);
+              })
+            }, (value: ConfigOptionValueView) => `${value.providerId}-${value.value}`)
+          }
+          .width('100%')
+        }
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .constraintSize({ maxHeight: 210 })
+      } else if (this.sessionConfig !== null) {
+        Text(`当前模型：${this.sessionConfig.model.length > 0 ? this.sessionConfig.model : '未知'}${this.sessionConfig.provider.length > 0 ? `（${this.sessionConfig.provider}）` : ''}；候选目录未就绪，暂不可切换`)
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+          .width('100%')
+      }
+
+      // 思考档位（当前模型的候选；目录未就绪回退快照档位表）
+      if (this.thoughtLevelCandidates().length > 1) {
+        Text('思考深度')
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+          .width('100%')
+        Row({ space: 6 }) {
+          ForEach(this.thoughtLevelCandidates(), (level: string) => {
+            Text(level)
+              .fontSize(12)
+              .fontColor(this.sessionConfig !== null && this.sessionConfig.thought === level
+                ? '#FFFFFF' : ZcodeColors.textSecondary())
+              .backgroundColor(this.sessionConfig !== null && this.sessionConfig.thought === level
+                ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
+              .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+              .borderRadius(999)
+              .opacity(this.switchBusy ? 0.5 : 1)
+              .onClick(() => {
+                const provider = this.sessionConfig !== null ? this.sessionConfig.provider : '';
+                const model = this.sessionConfig !== null ? this.sessionConfig.model : '';
+                void this.doSwitchModel(provider, model, level);
+              })
+          }, (level: string) => `${level}-${this.sessionConfig !== null && this.sessionConfig.thought === level ? 1 : 0}`)
+        }
+        .width('100%')
+      }
+    }
+    .padding(10)
+    .borderRadius(12)
+    .backgroundColor(ZcodeColors.card())
+    .border({ width: 1, color: ZcodeColors.SURFACE })
+    .margin({ left: 16, right: 16, bottom: 4 })
+    .width('100%')
+  }
+
+  /** 批次21：用量面板（套餐余额/额度桶/重置时间；usage-stats 通道直连查询）。 */
+  @Builder
+  UsagePanel() {
+    Column({ space: 10 }) {
+      Row({ space: 8 }) {
+        ZIcon({ name: ZIconName.Usage, iconSize: 16, color: ZcodeColors.textSecondary() })
+        Text('用量')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(ZcodeColors.textPrimary())
+        Blank()
+        ZIcon({ name: ZIconName.Refresh, iconSize: 15, color: ZcodeColors.textTertiary() })
+          .opacity(this.usageLoading ? 0.4 : 1)
+          .onClick(() => {
+            void this.refreshUsage();
+          })
+        ZIcon({ name: ZIconName.Close, iconSize: 16, color: ZcodeColors.textTertiary() })
+          .onClick(() => {
+            this.usagePanelOpen = false;
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.usageLoading && this.usage === null) {
+        Text('加载中…')
+          .fontSize(12)
+          .fontColor(ZcodeColors.textTertiary())
+      } else if (this.usage === null) {
+        Text('尚未获取')
+          .fontSize(12)
+          .fontColor(ZcodeColors.textTertiary())
+      } else if (!this.usage.authenticated) {
+        Text(this.usageReasonText(this.usage.unavailableReason))
+          .fontSize(12)
+          .fontColor(ZcodeColors.textSecondary())
+          .width('100%')
+      } else {
+        Row({ space: 12 }) {
+          if (this.usage.remainingCount >= 0) {
+            Column({ space: 2 }) {
+              Text(`${this.usage.remainingCount}`)
+                .fontSize(20)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(ZcodeColors.textPrimary())
+              Text('剩余次数')
+                .fontSize(10)
+                .fontColor(ZcodeColors.textTertiary())
+            }
+            .alignItems(HorizontalAlign.Start)
+          }
+          Column({ space: 2 }) {
+            Text(this.usage.remainingPercentage >= 0 ? `${this.usage.remainingPercentage}%` : '—')
+              .fontSize(20)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.usage.remainingPercentage >= 0 && this.usage.remainingPercentage <= 20
+                ? ZcodeColors.WARNING : ZcodeColors.textPrimary())
+            Text('剩余额度')
+              .fontSize(10)
+              .fontColor(ZcodeColors.textTertiary())
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          if (this.usage.nextResetTime > 0) {
+            Column({ space: 2 }) {
+              Text(this.formatResetTime(this.usage.nextResetTime))
+                .fontSize(13)
+                .fontColor(ZcodeColors.textSecondary())
+              Text('重置时间')
+                .fontSize(10)
+                .fontColor(ZcodeColors.textTertiary())
+            }
+            .alignItems(HorizontalAlign.End)
+          }
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        // 额度桶（可能多周期；percentage = 已使用占比）
+        if (this.usage.limits.length > 0) {
+          Column({ space: 6 }) {
+            ForEach(this.usage.limits, (limit: UsageQuotaLimitView) => {
+              Column({ space: 3 }) {
+                Row({ space: 6 }) {
+                  Text(limit.type.length > 0 ? limit.type : '额度')
+                    .fontSize(11)
+                    .fontColor(ZcodeColors.textSecondary())
+                  Blank()
+                  Text(limit.percentage >= 0 ? `已用 ${limit.percentage}%` : '')
+                    .fontSize(11)
+                    .fontColor(ZcodeColors.textTertiary())
+                }
+                .width('100%')
+                Progress({ value: limit.percentage >= 0 ? limit.percentage : 0, total: 100, type: ProgressType.Linear })
+                  .color(limit.percentage >= 80 ? ZcodeColors.WARNING : ZcodeColors.BRAND)
+                  .backgroundColor(ZcodeColors.SURFACE)
+                  .width('100%')
+                  .height(4)
+              }
+              .width('100%')
+            }, (limit: UsageQuotaLimitView) => `${limit.type}-${limit.percentage}`)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+
+        Row({ space: 6 }) {
+          if (this.usage.identityMasked.length > 0) {
+            Text(this.usage.identityMasked)
+              .fontSize(11)
+              .fontColor(ZcodeColors.textTertiary())
+          }
+          if (this.usage.contextName.length > 0) {
+            Text(this.usage.contextName)
+              .fontSize(11)
+              .fontColor(ZcodeColors.textTertiary())
+          }
+        }
+        .width('100%')
+      }
+    }
+    .padding(10)
+    .borderRadius(12)
+    .backgroundColor(ZcodeColors.card())
+    .border({ width: 1, color: ZcodeColors.SURFACE })
+    .margin({ left: 16, right: 16, bottom: 4 })
+    .width('100%')
   }
 
   @Builder
@@ -855,20 +1267,72 @@ struct SessionDetail {
     })
   }
 
+  /** 批次21：blockKind 徽标中文（桌面 PermissionDialog 的内容分流面）。 */
+  private blockKindLabel(item: PendingInteractionView): string {
+    const approval = item.approval;
+    if (approval === null) {
+      return '';
+    }
+    if (approval.blockKind === 'execute') {
+      return '执行命令';
+    }
+    if (approval.blockKind === 'edit') {
+      return '文件修改';
+    }
+    if (approval.blockKind === 'mcp') {
+      return 'MCP 工具';
+    }
+    if (approval.blockKind === 'skill') {
+      return '技能';
+    }
+    if (approval.blockKind === 'search') {
+      return '网络搜索';
+    }
+    if (approval.blockKind === 'workflow') {
+      return '工作流';
+    }
+    return '';
+  }
+
   @Builder
   ApprovalCard(item: PendingInteractionView) {
     Column({ space: 10 }) {
       Row({ space: 8 }) {
         StatusDot({ tone: StatusTone.PendingConfirm, dotSize: 10 })
-        if (item.toolName.length > 0) {
+        if (item.kind === 'permission' && item.approval !== null && item.approval.blockKind === 'mcp'
+          && item.approval.mcpServerName.length > 0) {
+          Text(`${item.approval.mcpServerName} · ${item.approval.mcpToolName}`)
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ZcodeColors.textPrimary())
+            .maxLines(1)
+            .constraintSize({ maxWidth: 160 })
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        } else if (item.toolName.length > 0) {
           Text(item.toolName)
             .fontSize(13)
             .fontWeight(FontWeight.Medium)
             .fontColor(ZcodeColors.textPrimary())
+            .maxLines(1)
+            .constraintSize({ maxWidth: 160 })
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
-        Text(item.kind === 'permission' ? '待批准' : (item.kind === 'userInput' ? '待回答' : '待审核'))
-          .fontSize(11)
-          .fontColor(ZcodeColors.textTertiary())
+        if (this.blockKindLabel(item).length > 0) {
+          Text(this.blockKindLabel(item))
+            .fontSize(10)
+            .fontColor(ZcodeColors.BRAND_LIGHT)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .borderRadius(6)
+            .backgroundColor('#1D2A4A')
+        }
+        if (item.originKind === 'subagent') {
+          Text(item.originAgentType.length > 0 ? `子代理·${item.originAgentType}` : '子代理')
+            .fontSize(10)
+            .fontColor(ZcodeColors.textSecondary())
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .borderRadius(6)
+            .backgroundColor(ZcodeColors.SURFACE)
+        }
         Blank()
         if (this.resolvingId === item.interactionId) {
           Text('已应答，等待电脑确认…')
@@ -885,6 +1349,89 @@ struct SessionDetail {
         .maxLines(4)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
 
+      // 桌面级内容派生（批次21 approvalPreview）：原因/命令/文件/搜索词
+      if (item.kind === 'permission' && item.approval !== null) {
+        if (item.approval.displayReason.length > 0 && item.approval.displayReason !== item.title) {
+          Text(item.approval.displayReason)
+            .fontSize(12)
+            .fontColor(ZcodeColors.textSecondary())
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        if (item.approval.command.length > 0) {
+          Scroll() {
+            Text(item.approval.command)
+              .fontSize(12)
+              .fontFamily('monospace')
+              .fontColor(ZcodeColors.TEXT_PRIMARY)
+              .textAlign(TextAlign.Start)
+          }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
+          .width('100%')
+          .padding(10)
+          .borderRadius(10)
+          .backgroundColor(ZcodeColors.background())
+        }
+        if (item.approval.fileChanges.length > 0) {
+          Column({ space: 4 }) {
+            ForEach(item.approval.fileChanges, (change: ApprovalFileChangeView) => {
+              Row({ space: 6 }) {
+                Text(change.type === 'add' ? '新增' : '更新')
+                  .fontSize(10)
+                  .fontColor(change.type === 'add' ? ZcodeColors.SUCCESS : ZcodeColors.WARNING)
+                  .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                  .borderRadius(4)
+                  .backgroundColor(change.type === 'add' ? ZcodeColors.DIFF_ADD : ZcodeColors.SURFACE)
+                Text(change.path)
+                  .fontSize(12)
+                  .fontColor(ZcodeColors.textSecondary())
+                  .fontFamily('monospace')
+                  .maxLines(1)
+                  .layoutWeight(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%')
+            }, (change: ApprovalFileChangeView) => `${change.path}-${change.type}`)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        } else if (item.approval.filePaths.length > 0) {
+          Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
+            ForEach(item.approval.filePaths, (path: string) => {
+              Text(path)
+                .fontSize(11)
+                .fontColor(ZcodeColors.textSecondary())
+                .fontFamily('monospace')
+                .maxLines(1)
+                .constraintSize({ maxWidth: 220 })
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                .borderRadius(6)
+                .backgroundColor(ZcodeColors.background())
+                .margin({ right: 6, bottom: 6 })
+            }, (path: string) => path)
+          }
+          .width('100%')
+        }
+        if (item.approval.searchUrl.length > 0 || item.approval.searchQuery.length > 0) {
+          Text(item.approval.searchUrl.length > 0 ? item.approval.searchUrl : item.approval.searchQuery)
+            .fontSize(12)
+            .fontColor(ZcodeColors.textSecondary())
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+        }
+      }
+
+      // AskUserQuestion 多问题进度（批次21）
+      if (item.kind === 'userInput' && item.questionCount > 1) {
+        Text(`第 ${item.questionIndex + 1}/${item.questionCount} 题${item.questionHeader.length > 0 ? ` · ${item.questionHeader}` : ''}${item.multiSelect ? ' · 可多选' : ''}`)
+          .fontSize(11)
+          .fontColor(ZcodeColors.textTertiary())
+          .width('100%')
+      }
+
       if (item.kind === 'workspaceHookReview') {
         Text('工作区 Hook 审核请在桌面端处理')
           .fontSize(12)
@@ -892,21 +1439,54 @@ struct SessionDetail {
       } else {
         Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Start }) {
           ForEach(item.options, (option: PendingInteractionOptionView) => {
-            Button(option.label)
-              .fontSize(13)
-              .fontColor(this.optionFontColor(option))
-              .backgroundColor(this.optionBackground(option))
-              .borderRadius(10)
-              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-              .margin({ right: 8, bottom: 8 })
-              .enabled(this.resolvingId.length === 0)
-              .onClick(() => {
-                const answer: ResolveAnswer = { optionId: option.optionId };
-                void this.resolve(item, answer);
-              })
+            Column({ space: 2 }) {
+              Text(item.kind === 'permission'
+                ? approvalOptionLabel(option.optionId, option.kind, option.label) : option.label)
+                .fontSize(13)
+                .fontColor(this.optionFontColor(option))
+              if (item.kind === 'permission'
+                && approvalOptionDescription(option.optionId, option.kind, option.scopes.length > 0 ? 'command' : '').length > 0) {
+                Text(approvalOptionDescription(option.optionId, option.kind, option.scopes.length > 0 ? 'command' : ''))
+                  .fontSize(10)
+                  .fontColor(this.optionFontColor(option))
+                  .opacity(0.75)
+                  .maxLines(1)
+              }
+            }
+            .alignItems(HorizontalAlign.Center)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(10)
+            .backgroundColor(this.optionBackground(option))
+            .margin({ right: 8, bottom: 8 })
+            .enabled(this.resolvingId.length === 0)
+            .onClick(() => {
+              const answer: ResolveAnswer = { optionId: option.optionId };
+              void this.resolve(item, answer);
+            })
           }, (option: PendingInteractionOptionView) => `${item.interactionId}-${option.optionId}`)
         }
         .width('100%')
+
+        // 「始终允许」的命令前缀范围（桌面 readPermissionRuleScopes 同源）
+        if (item.kind === 'permission') {
+          ForEach(item.options, (option: PendingInteractionOptionView) => {
+            if (option.kind === 'allowAlways' && option.scopes.length > 0) {
+              Column({ space: 2 }) {
+                ForEach(option.scopes, (scope: string) => {
+                  Text(scope)
+                    .fontSize(11)
+                    .fontFamily('monospace')
+                    .fontColor(ZcodeColors.textTertiary())
+                    .maxLines(1)
+                    .width('100%')
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }, (scope: string) => scope)
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+            }
+          }, (option: PendingInteractionOptionView) => `${option.optionId}-${option.scopes.length}`)
+        }
 
         if (item.freeText) {
           Row({ space: 8 }) {
@@ -1598,6 +2178,16 @@ struct SessionDetail {
             .padding(3)
         }
 
+        // 批次21：会话配置面板（模式/模型/档位）
+        if (this.configPanelOpen) {
+          this.ConfigPanel()
+        }
+
+        // 批次21：用量面板（套餐余额）
+        if (this.usagePanelOpen) {
+          this.UsagePanel()
+        }
+
         // INP-4：@ 引用面板
         if (this.atPanelOpen) {
           this.AtPanel()
@@ -1651,32 +2241,52 @@ struct SessionDetail {
                 this.onMainInputChanged(value);
               })
 
-            Row({ space: 6 }) {
-              Text('📸')
-                .fontSize(14)
+            Row({ space: 12 }) {
+              ZIcon({ name: ZIconName.Camera, iconSize: 18 })
                 .opacity(this.attachBusy ? 0.4 : 1)
                 .onClick(() => {
                   void this.pickCamera();
                 })
-              Text('📷')
-                .fontSize(14)
+              ZIcon({ name: ZIconName.Picture, iconSize: 18 })
                 .opacity(this.attachBusy ? 0.4 : 1)
                 .onClick(() => {
                   void this.pickImage();
                 })
-              Text('📄')
-                .fontSize(13)
+              ZIcon({ name: ZIconName.Doc, iconSize: 17 })
                 .opacity(this.attachBusy ? 0.4 : 1)
                 .onClick(() => {
                   void this.pickDocument();
                 })
-              Text('模式')
-                .fontSize(10)
-                .fontColor(ZcodeColors.textTertiary())
-              this.ModeChip('Agent', 'build')
-              this.ModeChip('问答', 'ask')
-              this.ModeChip('Plan', 'plan')
               Blank()
+              // 当前会话模式（点击展开配置面板：模式/模型/档位）
+              Row({ space: 4 }) {
+                Text(this.modeLabel(this.currentMode()))
+                  .fontSize(11)
+                  .fontColor(this.configPanelOpen ? '#FFFFFF' : ZcodeColors.textSecondary())
+                ZIcon({
+                  name: ZIconName.ChevronUp,
+                  iconSize: 11,
+                  color: this.configPanelOpen ? '#FFFFFF' : ZcodeColors.textTertiary(),
+                })
+              }
+              .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+              .borderRadius(999)
+              .backgroundColor(this.configPanelOpen ? ZcodeColors.BRAND : ZcodeColors.background())
+              .onClick(() => {
+                this.toggleConfigPanel();
+              })
+              // 用量入口（套餐余额）
+              ZIcon({
+                name: ZIconName.Usage,
+                iconSize: 15,
+                color: this.usagePanelOpen ? '#FFFFFF' : ZcodeColors.textTertiary(),
+              })
+                .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+                .borderRadius(999)
+                .backgroundColor(this.usagePanelOpen ? ZcodeColors.BRAND : Color.Transparent)
+                .onClick(() => {
+                  this.toggleUsagePanel();
+                })
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)

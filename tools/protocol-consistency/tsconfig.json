@@ -12,7 +12,8 @@
       // zod 取自协议 HAR 自带 tarball（commons/protocol/libs/zod-4.6.5.tgz），
       // 供 E 盘完整 zcode 仓（未装依赖）的原包 shared 源解析。
       "@zcode/model-option-map": ["./node_modules/@zcode/model-option-map/src/index.ts"],
-      "zod": ["./node_modules/zod/src/index.ts"]
+      "zod": ["./node_modules/zod/src/index.ts"],
+      "@ohos.util": ["./stubs/ohos-util.ts"]
     }
   },
   "include": ["*.mjs"]

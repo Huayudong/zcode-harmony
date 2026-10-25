@@ -669,6 +669,31 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 23/23 + 构建 | ArkTS 严格模式三处收敛（对象展开/内联字面量/any）；spec：鸿蒙仓 `docs/specs/batch19-session-mgmt.md`；加密驱动复发被 if 守卫拦截后 stdin 修复，干净提交 b8b2ffb |
 | 遗留 | — | 归档（无 v4 命令，需协议演进）、editUserQuery 原生替换"修改后重发"、新建首输入直达；真机验收随 S 系列 |
 
+### Batch 20（2026-10-12）：断线感知三件套 + 模拟器联调全通（App+Server）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 联调突破 | ✅ | WSS 协议栈三层根因修复（pack.info TSD 加密污染 / ArkTS 无 TextEncoder 走 @ohos.util / runtimePolicy）→ 模拟器 UI「已连接」 |
+| **S1/S2/S4 全通** | ✅ | 模拟器上 M1 三准出场景全链实测：S2 真实模型流式回答 + Write 工具批准→执行→文件落地；S4 离线入队→恢复自动投递（0ffaa6d/d0727d9/fd5030a 三连环修复） |
+| server KeepAlive | ✅ | /ws 每 5s 下发 type 9 心跳帧（server 仓 6b7e6a0）；自签证书 SAN 补 10.0.2.2 |
+| 客户端判死 | ✅ | Transport 入站静默监测（5s 查/15s 判死→fireClosed）；HTTP/WS 禁系统代理；Engine connect 与 v4 握手各 15s 全限时 |
+| server 健壮性 | ✅ | ChannelServer.onRawMessage 整段 fail-soft（坏帧丢弃不再炸进程，e40e549 实战验证） |
+| 环境 | ⚠️ | 连环坑在档：证书 SAN 10.0.2.2 / Asset remove→add / agent 数据目录 ZCODE_STORAGE_DIR / proc-ctl 探针双重移位；独立启动脚本 E:\zcode-dev-data\start-zcode-server.ps1 |
+| 门禁 | ⚠️ 存量回归 | Buffer.ts 引 @ohos.util 后 rpc/session 一致性测试在 node 下无法加载——批次21 修复（node 侧 stub） |
+
+### Batch 21（2026-10-25）：审批卡片桌面级内容 + 会话配置切换 + 用量面板（App）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 数据面接线 | ✅ | 前批遗留的 approvalPreview/usageEntitlement/WorkspaceConfigModel 数据面补完 UI 消费链：ApprovalCard 内容派生（blockKind/命令/文件/选项排序中文映射/子代理徽标/AskUserQuestion 进度）、配置面板（模式四档/模型目录/思考档位）、用量面板（剩余/额度桶/重置时间） |
+| 会话级切换 | ✅ | switchCollaborationMode/switchModelConfig 均为 **CAS 命令**（COMMANDS_REQUIRING_BASE_REVISION 词表内）——信封必须带快照 baseRevision；发送不再带按次 mode，「问答」由会话级 plan 承接（Q3 口径不变） |
+| 缺陷修复 | ✅ | 数据面先行批次的四个真 bug：①WorkspaceConfigModel 快照 configOptions 嵌套读错（永远空目录）②origin 从 interaction 根读（上游在 payload 上）③usageEntitlement isObj 不防 undefined（缺键即崩）④switch 命令缺 CAS；均由门禁向量逼出 |
+| 存量回归 | ✅ | 批次20 起 rpc/session 一致性测试在 node 下无法加载（Buffer.ts 引 @ohos.util）——stubs/ohos-util.ts + tsconfig paths 修复 |
+| 设计基座 | ✅ | DesignTokens/Motion/ZIcon（sys.symbol 3846 清单验证名）入 uikit 公开面；输入舱 emoji 全部替换 |
+| ArkTS 收敛 | ✅ | 新坑在档：**arkts 赋值语句类型取右侧流类型**——Record 索引取值要过 typeof/=== 窄化，必须把 Record 值类型源头放宽（FieldValue 联合），中间变量无用；自定义谓词（isObject 等）不窄化，谓词后仍需 as |
+| 门禁 | ✅ 32/32 + 构建 | 新增 batch21-config-usage.test.mjs 9 组（快照嵌套回归/CAS 缺失拒/origin-from-payload 为关键断言）；spec：`docs/specs/batch21-config-approval.md` |
+| 真机批遗留 | — | workspace-config 目录真实 id 集、usage-stats 通道可用性、审批内容与桌面逐向量对拍、面板 UX；随 S 系列真机批 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；

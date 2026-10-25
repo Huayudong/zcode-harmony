@@ -10,6 +10,12 @@
  * 对外只导出具体接口——.ets 消费端拿到的都是可静态检查的形状。
  */
 import { applyConversationDeltas } from "./apply.js";
+import {
+  approvalOptionPriority,
+  approvalOptionLabel,
+  approvalOptionScopes,
+  deriveApprovalContent,
+} from "./approvalPreview.js";
 
 // ── 视图形状（.ets 消费面）──
 
@@ -33,12 +39,40 @@ export interface SessionSummaryView {
 /** 待处理交互的应答选项（permission 用服务端词表；userInput 为题面选项）。 */
 export interface PendingInteractionOptionView {
   optionId: string;
+  /** 服务端原始 label（UI 显示用中文映射见 approvalOptionLabel）。 */
   label: string;
   /** allowOnce/allowAlways/deny/custom；userInput 选项为空串。 */
   kind: string;
+  /** bash 命令前缀 scope（permission 的始终允许项；桌面 readPermissionRuleScopes 同源）。 */
+  scopes: string[];
+  /** 题面选项说明（userInput questions[].options[].description；空 = 无）。 */
+  description: string;
 }
 
-/** 待处理交互视图（OUT-3/4 吸底卡片的数据面）。 */
+/** 审批内容派生（桌面 PermissionDialog 的 blockKind 分流面，approvalPreview.ts 派生）。 */
+export interface ApprovalContentView {
+  /** 用户可读原因（已过滤通用策略文案；空串 = 无，UI 回退 title）。 */
+  displayReason: string;
+  /** edit/mcp/skill/search/workflow/execute/fallback。 */
+  blockKind: string;
+  /** execute 块的命令文本（空串 = 无）。 */
+  command: string;
+  /** 涉及文件路径（≤6）。 */
+  filePaths: string[];
+  /** edit 块文件变更（path + add/update）。 */
+  fileChanges: ApprovalFileChangeView[];
+  mcpServerName: string;
+  mcpToolName: string;
+  searchUrl: string;
+  searchQuery: string;
+}
+
+export interface ApprovalFileChangeView {
+  path: string;
+  type: string;
+}
+
+/** 待处理交互视图（OUT-3/4 吸底卡片的数据面；批次21 对齐桌面端内容要素）。 */
 export interface PendingInteractionView {
   interactionId: string;
   /** permission/userInput/workspaceHookReview（第三类本批只提示不在手机处理）。 */
@@ -53,6 +87,59 @@ export interface PendingInteractionView {
   sensitive: boolean;
   options: PendingInteractionOptionView[];
   createdAt: number;
+  /** permission 专用内容派生（userInput 为 null）。 */
+  approval: ApprovalContentView | null;
+  /** 来源徽标：origin.kind（"subagent" 时 UI 显示子代理徽标）。 */
+  originKind: string;
+  /** 子代理类型（origin.agentType）。 */
+  originAgentType: string;
+  /** 应答锚定行（-1 = 会话级）。 */
+  anchorRowId: number;
+  /** AskUserQuestion 自动结束截止（毫秒；0 = 无）。 */
+  autoDeadlineAt: number;
+  /** hiddenGrace/visibleCountdown/snoozed；空串 = 无自动结束。 */
+  autoState: string;
+  /** userInput 多问题的当前题号（0 起；-1 = 单问题）。 */
+  questionIndex: number;
+  questionCount: number;
+  /** 当前题的 header（AskUserQuestion 的短标签）。 */
+  questionHeader: string;
+  /** 当前题是否多选（App 先按单选渲染，多选建议桌面处理）。 */
+  multiSelect: boolean;
+}
+
+/** 会话配置视图（conversation snapshot.config → 输入栏模式/模型/档位显示与切换依据）。 */
+export interface SessionConfigView {
+  provider: string;
+  model: string;
+  thought: string;
+  /** 当前模型可用思考档位（空数组 = 旧快照）。 */
+  thoughtLevels: string[];
+  /** agent 协作模式（build/edit/plan/yolo；旧快照缺省 build）。 */
+  mode: string;
+  planEnabled: boolean;
+  followupMode: string;
+}
+
+/** workspace-config 配置项取值（模型/模式/档位的候选）。 */
+export interface ConfigOptionValueView {
+  value: string;
+  name: string;
+  description: string;
+  providerId: string;
+  providerName: string;
+  thoughtLevels: string[];
+  defaultThoughtLevel: string;
+}
+
+/** workspace-config 配置项视图（id: model/mode/thought_level/自定义）。 */
+export interface ConfigOptionView {
+  id: string;
+  name: string;
+  type: string;
+  /** workspace 缺省值（会话级当前值看 SessionConfigView）。 */
+  currentValue: string;
+  values: ConfigOptionValueView[];
 }
 
 /** 对话行视图（conversation 投影；字段按 kind 取用，未涉及的为空值）。 */
@@ -321,10 +408,29 @@ function rowViewFrom(source: Record<string, unknown>): ConversationRowView {
   };
 }
 
-/** 待处理交互投影（permission/userInput 各取卡片所需的最小面）。 */
+/** 选项投影：词表 label 原样保留 + bash 前缀 scope（permission）或题面说明（userInput）。 */
+function optionViewFrom(option: Record<string, unknown>, permissionLike: boolean): PendingInteractionOptionView {
+  const view: PendingInteractionOptionView = {
+    optionId: str(option, "optionId"),
+    label: str(option, "label"),
+    kind: str(option, "kind"),
+    scopes: permissionLike
+      ? approvalOptionScopes(child(option, "response"))
+      : [],
+    description: permissionLike ? "" : str(option, "description"),
+  };
+  if (typeof option["value"] === "string" && view.optionId.length === 0) {
+    view.optionId = option["value"];
+  }
+  return view;
+}
+
+/** 待处理交互投影（批次21：补桌面端内容要素——detail 派生/origin/anchor/auto/questions）。 */
 function pendingFrom(source: Record<string, unknown>): PendingInteractionView {
   const payload = child(source, "payload");
   const kind = str(source, "kind");
+  // origin 在 payload 上（permission/userInput 同位；上游 zcodeInteractionRequestOriginSchema）
+  const origin = payload !== null ? child(payload, "origin") : null;
   const view: PendingInteractionView = {
     interactionId: str(source, "interactionId"),
     kind: kind,
@@ -334,7 +440,22 @@ function pendingFrom(source: Record<string, unknown>): PendingInteractionView {
     sensitive: false,
     options: [],
     createdAt: num(source, "createdAt"),
+    approval: null,
+    originKind: str(origin, "kind"),
+    originAgentType: str(origin, "agentType"),
+    anchorRowId: typeof source["anchorRowId"] === "number" ? source["anchorRowId"] : -1,
+    autoDeadlineAt: 0,
+    autoState: "",
+    questionIndex: -1,
+    questionCount: 0,
+    questionHeader: "",
+    multiSelect: false,
   };
+  const auto = child(source, "autoResolution");
+  if (auto !== null) {
+    view.autoState = str(auto, "state");
+    view.autoDeadlineAt = num(auto, "deadlineAt");
+  }
   if (kind === "permission" && payload !== null) {
     view.title = str(payload, "summary");
     view.toolName = str(payload, "toolName");
@@ -344,25 +465,57 @@ function pendingFrom(source: Record<string, unknown>): PendingInteractionView {
       if (option === null) {
         continue;
       }
-      view.options.push({ optionId: str(option, "optionId"), label: str(option, "label"), kind: str(option, "kind") });
+      view.options.push(optionViewFrom(option, true));
     }
+    // fullAccessOption 是独立 additive 面（不在 options 里）——排序时作为 fullAccess 追加。
+    const fullAccess = child(payload, "fullAccessOption");
+    if (fullAccess !== null) {
+      view.options.push({
+        optionId: str(fullAccess, "optionId"),
+        label: str(fullAccess, "label"),
+        kind: str(fullAccess, "kind"),
+        scopes: [],
+        description: "",
+      });
+    }
+    // 桌面排序（allowOnce→allowAlways→fullAccess(1.5)→deny→custom），稳定。
+    const indexed: Array<{ option: PendingInteractionOptionView; index: number }> = [];
+    for (const option of view.options) {
+      indexed.push({ option: option, index: indexed.length });
+    }
+    indexed.sort((left, right) => {
+      const delta = approvalOptionPriority(left.option.optionId, left.option.kind)
+        - approvalOptionPriority(right.option.optionId, right.option.kind);
+      return delta !== 0 ? delta : left.index - right.index;
+    });
+    view.options = indexed.map((entry) => entry.option);
+    // 内容派生（detail/display 在 schema 面是 unknown——防御性按对象取）
+    view.approval = deriveApprovalContent(
+      view.toolName,
+      view.title,
+      asObjectOr(payload, "detail"),
+      asObjectOr(payload, "display"));
   } else if (kind === "userInput" && payload !== null) {
     view.freeText = bool(payload, "freeText");
     view.sensitive = bool(payload, "sensitive");
     // AskUserQuestion 多问题：取当前问题与其选项；单问题用 prompt + 顶层 options。
     const questions = arr(payload, "questions");
     const index = num(payload, "currentQuestionIndex");
+    view.questionCount = questions.length;
+    view.questionIndex = questions.length > 0 ? Math.min(Math.max(index, 0), questions.length - 1) : -1;
     const question = questions.length > 0
-      ? asRecord(questions[Math.min(Math.max(index, 0), questions.length - 1)])
+      ? asRecord(questions[view.questionIndex])
       : null;
     if (question !== null) {
       view.title = str(question, "question");
+      view.questionHeader = str(question, "header");
+      view.multiSelect = bool(question, "multiSelect");
       for (const item of arr(question, "options")) {
         const option = asRecord(item);
         if (option === null) {
           continue;
         }
-        view.options.push({ optionId: str(option, "value"), label: str(option, "label"), kind: "" });
+        view.options.push(optionViewFrom(option, false));
       }
     } else {
       view.title = str(payload, "prompt");
@@ -371,11 +524,19 @@ function pendingFrom(source: Record<string, unknown>): PendingInteractionView {
         if (option === null) {
           continue;
         }
-        view.options.push({ optionId: str(option, "optionId"), label: str(option, "label"), kind: "" });
+        view.options.push(optionViewFrom(option, false));
       }
     }
   }
   return view;
+}
+
+/** unknown 字段的防御性对象读取（null/数组/标量 → null）。 */
+function asObjectOr(source: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = source[key];
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 /** v4ConversationFileChangesResult → 报告视图（防御性提取；入参已经原 schema 校验）。 */
@@ -491,6 +652,31 @@ export class ConversationModel {
     return num(this.snapshot, "revision");
   }
 
+  /** 会话配置（模式/模型/思考档位；null = 快照未就绪或旧服务端无 config）。 */
+  sessionConfig(): SessionConfigView | null {
+    const config = child(this.snapshot, "config");
+    if (config === null) {
+      return null;
+    }
+    const levels: string[] = [];
+    for (const level of arr(config, "thoughtLevels")) {
+      if (typeof level === "string" && level.length > 0) {
+        levels.push(level);
+      }
+    }
+    const view: SessionConfigView = {
+      provider: str(config, "provider"),
+      model: str(config, "model"),
+      thought: str(config, "thought"),
+      thoughtLevels: levels,
+      // 旧快照缺省 build（schema 同款 default）。
+      mode: str(config, "mode").length > 0 ? str(config, "mode") : "build",
+      planEnabled: bool(config, "planEnabled"),
+      followupMode: str(config, "followupMode"),
+    };
+    return view;
+  }
+
   /** 快照日志纪元（fileChanges 查询的 baseLogEpoch；空串 = 未就绪）。 */
   logEpoch(): string {
     return str(this.snapshot, "logEpoch");
@@ -534,5 +720,114 @@ export class ConversationModel {
     } catch {
       return null;
     }
+  }
+}
+
+// ── workspace-config 投影（模型/模式/档位目录的活性数据源）──
+
+function configOptionFrom(source: Record<string, unknown>): ConfigOptionView {
+  const values: ConfigOptionValueView[] = [];
+  for (const item of arr(source, "options")) {
+    const value = asRecord(item);
+    if (value === null) {
+      continue;
+    }
+    const levels: string[] = [];
+    for (const level of arr(value, "modelThoughtLevels")) {
+      if (typeof level === "string" && level.length > 0) {
+        levels.push(level);
+      }
+    }
+    values.push({
+      value: str(value, "value"),
+      name: str(value, "name"),
+      description: str(value, "description"),
+      providerId: str(value, "modelProviderId"),
+      providerName: str(value, "modelProviderName"),
+      thoughtLevels: levels,
+      defaultThoughtLevel: str(value, "modelDefaultThoughtLevel"),
+    });
+  }
+  return {
+    id: str(source, "id"),
+    name: str(source, "name"),
+    type: str(source, "type"),
+    currentValue: typeof source["currentValue"] === "string" ? source["currentValue"] : "",
+    values: values,
+  };
+}
+
+/**
+ * workspace-config topic 归约器（conflated 最新态：snapshot 整体替换，
+ * deltas 只有 config.updated 一种 op，同样整体替换）。
+ */
+export class WorkspaceConfigModel {
+  private readonly optionsById = new Map<string, ConfigOptionView>();
+  private lastWorkspaceId = '';
+
+  /** 快照携带的 workspaceId（空串 = 尚未收到快照）。 */
+  workspaceId(): string {
+    return this.lastWorkspaceId;
+  }
+
+  /** 应用一帧；返回目录是否变化。 */
+  applyFrame(frame: WorkbenchFrameLike): boolean {
+    const { kind, body } = payloadOf(frame);
+    if (kind === "snapshot" && body !== null) {
+      this.lastWorkspaceId = str(body, "workspaceId");
+      // 快照形状：{ protocolVersion, workspaceId, logEpoch, config: { configOptions, slashCommands } }
+      // —— configOptions 嵌套在 config 下（与 delta 的 config.updated 同一出口）。
+      const config = child(body, "config") ?? body;
+      this.optionsById.clear();
+      for (const item of arr(config, "configOptions")) {
+        const record = asRecord(item);
+        if (record === null) {
+          continue;
+        }
+        const view = configOptionFrom(record);
+        if (view.id.length > 0) {
+          this.optionsById.set(view.id, view);
+        }
+      }
+      return true;
+    }
+    if (kind === "deltas" && body !== null) {
+      let changed = false;
+      for (const item of arr(body, "deltas")) {
+        const delta = asRecord(item);
+        if (delta === null || str(delta, "op") !== "config.updated") {
+          continue;
+        }
+        const config = child(delta, "config");
+        if (config === null) {
+          continue;
+        }
+        this.optionsById.clear();
+        for (const optionItem of arr(config, "configOptions")) {
+          const record = asRecord(optionItem);
+          if (record === null) {
+            continue;
+          }
+          const view = configOptionFrom(record);
+          if (view.id.length > 0) {
+            this.optionsById.set(view.id, view);
+          }
+        }
+        changed = true;
+      }
+      return changed;
+    }
+    return false;
+  }
+
+  /** 目录视图（原序）。 */
+  options(): ConfigOptionView[] {
+    const out: ConfigOptionView[] = [];
+    this.optionsById.forEach((view) => out.push(view));
+    return out;
+  }
+
+  optionOf(id: string): ConfigOptionView | null {
+    return this.optionsById.get(id) ?? null;
   }
 }

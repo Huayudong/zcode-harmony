@@ -72,9 +72,10 @@ interface EngineCommandEnvelope {
   baseLogEpoch?: string;
 }
 
-/** v4 命令词表（本批使用面；批次14 增 renameSession 会话改名）。 */
+/** v4 命令词表（本批使用面；批次14 增 renameSession；批次21 增模式/模型会话级切换）。 */
 export type CommandType = 'sendText' | 'stop' | 'resolveInteraction' | 'renameSession'
-  | 'createSession' | 'deleteSession' | 'retryTurn';
+  | 'createSession' | 'deleteSession' | 'retryTurn'
+  | 'switchCollaborationMode' | 'switchModelConfig';
 
 const BACKOFF_SCHEDULE_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
 /** WS connect（TCP+TLS+升级）限时：对端静默时握手可能永不返回，限时后走退避。 */
@@ -97,6 +98,7 @@ export class ConnectionEngine {
   /** 已激活会话订阅（重连后重订）。 */
   private readonly activeConversations = new Set<string>();
   private sessionsIndexActive = false;
+  private workspaceConfigActive = false;
 
   private attempts = 0;
   private backoffTimer: number | null = null;
@@ -362,6 +364,19 @@ export class ConnectionEngine {
     return ack.subscriptionId;
   }
 
+  /** 订阅 workspace-config（模型/模式/档位目录；批次21）。幂等：active 时直接返回。 */
+  async subscribeWorkspaceConfig(): Promise<string> {
+    if (this.client === null) {
+      throw new Error('未连接');
+    }
+    if (this.workspaceConfigActive) {
+      return '';
+    }
+    const ack = await this.client.subscribeWorkspaceConfig({ visibility: 'foreground' });
+    this.workspaceConfigActive = true;
+    return ack.subscriptionId;
+  }
+
   /** 重连后的重订（带水位：服务端 snapshot 或 resume）。 */
   private async resubscribeAll(): Promise<void> {
     if (this.client === null) {
@@ -369,6 +384,10 @@ export class ConnectionEngine {
     }
     if (this.sessionsIndexActive) {
       await this.subscribeSessionsIndex();
+    }
+    if (this.workspaceConfigActive) {
+      // 订阅是幂等声明：失败不致命（下个 online 事件重试），避免拖住整条重订链
+      await this.subscribeWorkspaceConfig().catch(() => {});
     }
     const sessionIds: string[] = [];
     this.activeConversations.forEach((sessionId: string) => sessionIds.push(sessionId));
@@ -483,6 +502,16 @@ export class ConnectionEngine {
       return Promise.reject(new Error('未连接'));
     }
     return client.searchWorkspaceFiles({ query: query, limit: limit });
+  }
+
+  // ── 用量/套餐余额（usage-stats 通道；需在线）──
+
+  getEntitlementSnapshot(params: object): Promise<object> {
+    const client = this.client;
+    if (client === null) {
+      return Promise.reject(new Error('未连接'));
+    }
+    return client.getEntitlementSnapshot(params);
   }
 
   // ── 附件分块上传（需在线；上传是服务调用不是命令，失败由编排层决定重试/放弃）──

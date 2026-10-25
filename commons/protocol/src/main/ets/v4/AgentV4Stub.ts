@@ -83,6 +83,26 @@ export class ZCodeAgentStub {
     return this.call('unsubscribeConversationV4', params);
   }
 
+  // ── workspace-config 通道（workspace 级配置目录；批次21 模型/档位选择的数据源）──
+
+  subscribeWorkspaceConfigV4(
+    params: WorkspaceTarget & { runtimePolicy?: 'start-if-needed' | 'existing-only'; visibility?: 'foreground' | 'background' },
+  ): Promise<{ ack: { subscriptionId: string; mode: 'snapshot' | 'resume'; logEpoch: string } }> {
+    return this.call('subscribeWorkspaceConfigV4', params);
+  }
+
+  resyncWorkspaceConfigV4(
+    params: WorkspaceTarget & { subscriptionId: string; base: SubscribeBase | null; runtimePolicy?: 'start-if-needed' | 'existing-only'; forceSnapshot?: boolean },
+  ): Promise<{ ack: { subscriptionId: string; mode: 'snapshot' | 'resume'; logEpoch: string } }> {
+    return this.call('resyncWorkspaceConfigV4', params);
+  }
+
+  unsubscribeWorkspaceConfigV4(
+    params: WorkspaceTarget & { subscriptionId: string; runtimePolicy?: 'start-if-needed' | 'existing-only' },
+  ): Promise<void> {
+    return this.call('unsubscribeWorkspaceConfigV4', params);
+  }
+
   conversationRowsRangeV4(
     params: WorkspaceTarget & { sessionId: string; beforeRowId?: number; limit: number },
   ): Promise<object> {
@@ -153,6 +173,40 @@ export class ZCodeAgentStub {
   /** workspace 级 sessions-index 下行帧流（同一通知，按 topic 前缀分流）。 */
   onDynamicSessionsIndexFrame(target: WorkspaceTarget): Event<unknown> {
     return this.listenDynamic('onDynamicSessionsIndexFrame', target);
+  }
+
+  /** workspace 级 workspace-config 下行帧流（同一通知，按 topic 前缀分流）。 */
+  onDynamicWorkspaceConfigFrame(target: WorkspaceTarget): Event<unknown> {
+    return this.listenDynamic('onDynamicWorkspaceConfigFrame', target);
+  }
+}
+
+/**
+ * IUsageStatsService 显式桩（用量/套餐余额；channels RPC，非 v4 wire）。
+ * 通道名与 server 端 ServiceChannels.UsageStats（"usage-stats"）一致；
+ * standalone server 在 /ws 上与 zcode-agent 通道同批暴露。
+ */
+export const USAGE_STATS_CHANNEL = 'usage-stats';
+
+export class UsageStatsStub {
+  private readonly channel: IChannel;
+
+  constructor(channel: IChannel) {
+    this.channel = channel;
+  }
+
+  private call<T>(method: string, params: object): Promise<T> {
+    return this.channel.call<T>(method, [params]);
+  }
+
+  /** 套餐权益快照（remaining/quota/subscription；未开通时 unavailableReason 说明）。 */
+  getEntitlementSnapshot(params: object): Promise<object> {
+    return this.call<object>('getEntitlementSnapshot', params);
+  }
+
+  /** 本地应用统计（token/工具；非套餐余额）。 */
+  getSnapshot(params: object): Promise<object> {
+    return this.call<object>('getSnapshot', params);
   }
 }
 
