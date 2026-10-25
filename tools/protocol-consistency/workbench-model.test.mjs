@@ -388,3 +388,26 @@ test('createSession/deleteSession/retryTurn 信封：合法载荷过 schema', ()
   assert.equal(r3b.ok, false);
   void FENCE;
 });
+
+// ── 7. editUserQuery 信封（批次22 / OUT-7「修改后重发」原生化）──
+test('editUserQuery 信封：CAS 双水位必带，newText/target 形状校验', () => {
+  const mk = (commandId, extra) => ({
+    commandId, clientId: 'client-1', sessionId: 's-1', type: 'editUserQuery',
+    payload: { target: { rowId: 3, entityId: 'e-3' }, newText: '改成这样再跑' },
+    issuedAt: 1_726_000_000_000, ...extra,
+  });
+  // 双 CAS 齐备 + 缺省 workspaceMode（preserve 语义）
+  assert.equal(commandMod.parseCommandEnvelope(mk('cmd-e1', { baseRevision: 7, baseLogEpoch: 'epoch-1' })).ok, true);
+  // workspaceMode=rewind 亦合法
+  const rewind = mk('cmd-e2', { baseRevision: 7, baseLogEpoch: 'epoch-1' });
+  rewind.payload.workspaceMode = 'rewind';
+  assert.equal(commandMod.parseCommandEnvelope(rewind).ok, true);
+  // 缺 baseRevision → 拒（COMMANDS_REQUIRING_BASE_REVISION）
+  assert.equal(commandMod.parseCommandEnvelope(mk('cmd-e3', { baseLogEpoch: 'epoch-1' })).ok, false);
+  // 缺 baseLogEpoch → 拒（ROW_TARGETING_COMMANDS：行定位命令防跨纪元错位）
+  assert.equal(commandMod.parseCommandEnvelope(mk('cmd-e4', { baseRevision: 7 })).ok, false);
+  // 缺 newText → 拒
+  const noText = mk('cmd-e5', { baseRevision: 7, baseLogEpoch: 'epoch-1' });
+  delete noText.payload.newText;
+  assert.equal(commandMod.parseCommandEnvelope(noText).ok, false);
+});

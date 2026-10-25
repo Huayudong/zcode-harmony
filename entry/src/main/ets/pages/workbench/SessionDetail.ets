@@ -95,6 +95,9 @@ struct SessionDetail {
   @State usageLoading: boolean = false;
   @State switchBusy: boolean = false;
   @State switchHint: string = '';
+  // ── 批次22：editUserQuery 编辑态（-1 = 非编辑；锚定被替换的原 userInput 行）──
+  @State editTargetRowId: number = -1;
+  @State editTargetEntityId: string = '';
   private atSearchTimer: number = -1;
   private listScroller: Scroller = new Scroller();
   private blocksByRow: Map<number, MdBlock[]> = new Map();
@@ -258,6 +261,34 @@ struct SessionDetail {
     }
     this.inputText = lastUserInput;
     void this.send();
+  }
+
+  /** OUT-7「修改后重发」（批次22 原生化）：锚定本轮 userInput 行进入编辑态，
+   *  发送走 editUserQuery（服务端替换文本 + 切分支重跑）；找不到目标行退回旧行为（普通回填）。 */
+  private startEditResend(failedRow: ConversationRowView): void {
+    let target: ConversationRowView | null = null;
+    for (const row of this.rows) {
+      if (row.rowId >= failedRow.rowId) {
+        break;
+      }
+      if (row.kind === 'userInput' && row.text.length > 0) {
+        target = row;
+      }
+    }
+    if (target === null) {
+      this.editLastInput();
+      return;
+    }
+    this.editTargetRowId = target.rowId;
+    this.editTargetEntityId = target.entityId;
+    this.inputText = target.text;
+    this.scheduleDraftSave();
+    this.sendHint = '';
+  }
+
+  private cancelEdit(): void {
+    this.editTargetRowId = -1;
+    this.editTargetEntityId = '';
   }
 
   /** OUT-7「修改后重发」：回填输入框，用户编辑后再发送。 */
@@ -451,8 +482,15 @@ struct SessionDetail {
     this.sending = true;
     this.sendHint = '';
     try {
-      // 批次21起模式为会话级状态（switchCollaborationMode 切换），发送不再带按次模式
-      await this.controller.sendText(this.sessionId, text, '', this.attachments);
+      if (this.editTargetRowId >= 0) {
+        // 批次22：编辑态发送 = editUserQuery（服务端替换原消息并切分支重跑）
+        await this.controller.editUserQuery(this.sessionId, this.editTargetRowId,
+          this.editTargetEntityId, text);
+        this.cancelEdit();
+      } else {
+        // 批次21起模式为会话级状态（switchCollaborationMode 切换），发送不再带按次模式
+        await this.controller.sendText(this.sessionId, text, '', this.attachments);
+      }
       this.inputText = '';
       this.stopArmed = false;
       void this.persistDraft();
@@ -1712,7 +1750,7 @@ struct SessionDetail {
               .fontSize(12)
               .fontColor(ZcodeColors.BRAND_LIGHT)
               .onClick(() => {
-                this.editLastInput();
+                this.startEditResend(row);
               })
           }
           .padding({ left: 10, right: 10, top: 6, bottom: 6 })
@@ -2176,6 +2214,30 @@ struct SessionDetail {
             .width('100%')
             .textAlign(TextAlign.Center)
             .padding(3)
+        }
+
+        // 批次22：编辑态横条（editUserQuery 锚定中；发送将替换原消息并切分支重跑）
+        if (this.editTargetRowId >= 0) {
+          Row({ space: 8 }) {
+            ZIcon({ name: ZIconName.Doc, iconSize: 13, color: ZcodeColors.BRAND_LIGHT })
+            Text('正在编辑原消息，发送后将替换并重新执行')
+              .fontSize(11)
+              .fontColor(ZcodeColors.BRAND_LIGHT)
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text('取消')
+              .fontSize(11)
+              .fontColor(ZcodeColors.textTertiary())
+              .onClick(() => {
+                this.cancelEdit();
+              })
+          }
+          .width('100%')
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .borderRadius(8)
+          .backgroundColor('#1D2A4A')
+          .margin({ left: 16, right: 16 })
         }
 
         // 批次21：会话配置面板（模式/模型/档位）

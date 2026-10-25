@@ -72,10 +72,10 @@ interface EngineCommandEnvelope {
   baseLogEpoch?: string;
 }
 
-/** v4 命令词表（本批使用面；批次14 增 renameSession；批次21 增模式/模型会话级切换）。 */
+/** v4 命令词表（本批使用面；批次14 增 renameSession；批次21 增模式/模型会话级切换；批次22 增 editUserQuery）。 */
 export type CommandType = 'sendText' | 'stop' | 'resolveInteraction' | 'renameSession'
   | 'createSession' | 'deleteSession' | 'retryTurn'
-  | 'switchCollaborationMode' | 'switchModelConfig';
+  | 'switchCollaborationMode' | 'switchModelConfig' | 'editUserQuery';
 
 const BACKOFF_SCHEDULE_MS: number[] = [1000, 2000, 4000, 8000, 15000, 30000];
 /** WS connect（TCP+TLS+升级）限时：对端静默时握手可能永不返回，限时后走退避。 */

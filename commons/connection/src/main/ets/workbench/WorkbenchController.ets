@@ -190,6 +190,12 @@ interface SwitchModelPayload {
   thought: string;
 }
 
+/** editUserQuery：定位目标行 + 新文本（批次22「修改后重发」原生化）。 */
+interface EditUserQueryPayload {
+  target: RetryTurnTarget;
+  newText: string;
+}
+
 /** usage-stats 通道的空请求体（getEntitlementSnapshot 无入参面）。 */
 interface UsageEntitlementQuery {
 }
@@ -1004,7 +1010,7 @@ export class WorkbenchController {
   }
 
   /** 原生重试（OUT-7 正解）：retryTurn 定位到失败行所在轮，服务端按轮重跑。
-   *  行定位命令走 CAS：信封必须带快照 baseRevision + baseLogEpoch，过期重试服务端按 stale 拒绝。 */
+   *  行定位命令走 CAS：信封必须带快照 baseRevision + baseLogEpoch，过期重试服务端按 stale 拒。 */
   async retryTurn(sessionId: string, rowId: number, entityId: string): Promise<void> {
     const engine = this.engine;
     const model = this.conversationModels.get(sessionId);
@@ -1018,6 +1024,24 @@ export class WorkbenchController {
     const target: RetryTurnTarget = { rowId: rowId, entityId: entityId };
     const payload: RetryTurnPayload = { target: target };
     await engine.sendCommand(sessionId, 'retryTurn', payload, model.revision(), baseLogEpoch);
+  }
+
+  /** 原生「修改后重发」（批次22 OUT-7 正解）：editUserQuery 定位到原 userInput 行，
+   *  服务端替换文本并切 conversation 分支重跑（缺省 preserve：仅切分支不动文件）。
+   *  行定位 CAS 命令：baseRevision + baseLogEpoch 双必带。 */
+  async editUserQuery(sessionId: string, rowId: number, entityId: string, newText: string): Promise<void> {
+    const engine = this.engine;
+    const model = this.conversationModels.get(sessionId);
+    if (engine === null || model === undefined) {
+      throw new Error('未连接');
+    }
+    const baseLogEpoch = model.logEpoch();
+    if (baseLogEpoch.length === 0) {
+      throw new Error('会话快照未就绪');
+    }
+    const target: RetryTurnTarget = { rowId: rowId, entityId: entityId };
+    const payload: EditUserQueryPayload = { target: target, newText: newText };
+    await engine.sendCommand(sessionId, 'editUserQuery', payload, model.revision(), baseLogEpoch);
   }
 
   /** 会话改名（A9 列表重命名；title 走 renameSession 幂等命令，服务端落 meta.title）。 */

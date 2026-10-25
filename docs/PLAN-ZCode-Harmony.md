@@ -694,6 +694,17 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 32/32 + 构建 | 新增 batch21-config-usage.test.mjs 9 组（快照嵌套回归/CAS 缺失拒/origin-from-payload 为关键断言）；spec：`docs/specs/batch21-config-approval.md` |
 | 真机批遗留 | — | workspace-config 目录真实 id 集、usage-stats 通道可用性、审批内容与桌面逐向量对拍、面板 UX；随 S 系列真机批 |
 
+### Batch 22（2026-10-25）：editUserQuery 原生「修改后重发」（App，OUT-7 收口）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 原生化 | ✅ | 失败卡片「修改后重发」从本地回填升级为 editUserQuery（服务端替换原消息 + 切 conversation 分支重跑）；批次18 简化实现与批次19 遗留项收口 |
+| 双 CAS | ✅ | 同时在 COMMANDS_REQUIRING_BASE_REVISION 与 ROW_TARGETING_COMMANDS——baseRevision/baseLogEpoch 双必带，比 switch 更严（行定位防跨纪元错位）；由门禁向量坐实 |
+| UI | ✅ | startEditResend 锚定失败行前最近 userInput 行；编辑态横条（可取消）；send() 分流（编辑态走 editUserQuery）；目标行缺失退回旧行为 |
+| workspaceMode | — | preserve/rewind 开关 M1 不暴露（rewind 涉及文件回滚，防误触；保持协议缺省 preserve） |
+| 门禁 | ✅ 33/33 + 构建 | workbench-model.test.mjs 增 editUserQuery 信封组（双 CAS 拒单缺/rewind 过/缺 newText 拒）；spec：`docs/specs/batch22-edit-user-query.md` |
+| 真机批遗留 | — | 分支切换后的 UI 呈现（旧分支消息展示/delta 形状）随 S 系列 |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
