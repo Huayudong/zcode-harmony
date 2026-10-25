@@ -705,6 +705,16 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 33/33 + 构建 | workbench-model.test.mjs 增 editUserQuery 信封组（双 CAS 拒单缺/rewind 过/缺 newText 拒）；spec：`docs/specs/batch22-edit-user-query.md` |
 | 真机批遗留 | — | 分支切换后的 UI 呈现（旧分支消息展示/delta 形状）随 S 系列 |
 
+### 批次23 联调尝试（2026-10-25）：模拟器环境内存阻塞（未成行，环境记录）
+
+- server 侧就绪：`E:\zcode-dev-data\start-zcode-server.ps1` 起动成功（HTTPS:3030 监听）；
+  可装 HAP 管线产物已备（rebuild-hap.js + sign-clean.js → entry-default-signed-clean.hap，含批次21/22 代码）。
+- **模拟器硬阻塞**：Mate 80 Pro CLI 启动被 CheckRuntimeEnv 拒——`Commit charge is not enough`
+  （需预留 4GB 提交内存；实测物理可用 0.7-1.1GB / 提交可用 1.4-1.8GB；页面文件手动管理小上限，
+  扩容需重启）。宿主 idea64 占 ~3GB（用户工作进程不可动）。杀 hvigor daemon 残留（--max-old-space 8192）仅释放 0.4GB。
+- 解锁路径（用户侧）：关闭 IDEA 或扩页面文件重启后，按 `docs/scene-checklist.md` 补跑批次21/22 实测项
+  （workspace-config 目录真实 id 集 / usage-stats 通道 / 审批内容对拍 / editUserQuery 分支呈现）。
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
