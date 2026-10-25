@@ -715,6 +715,17 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 - 解锁路径（用户侧）：关闭 IDEA 或扩页面文件重启后，按 `docs/scene-checklist.md` 补跑批次21/22 实测项
   （workspace-config 目录真实 id 集 / usage-stats 通道 / 审批内容对拍 / editUserQuery 分支呈现）。
 
+### Batch 24（2026-10-26）：shadcn/ui 设计语言转译第一阶段（App，UI 重构）
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 用户裁决 | ✅ | 以 ui.shadcn.com 组件设计为基础重构 App UI；shadcn 为 React/Tailwind 栈不可直跑——做设计语言转译（token + 组件变体规范 → ArkTS），非引包 |
+| Token 对齐 | ✅ | 色板切至 shadcn zinc 暗色系（--background/--card/--muted/--border/--accent/--ring 全映射）；**ZcodeColors API 不变 → 存量页面零改动完成切换**；spec：`docs/specs/ui-shadcn-refactor.md`（映射表） |
+| 组件首批 | ✅ | ZButton（variant×size 五变体四尺寸）/ZBadge（六变体）/ZSkeleton（脉动）；入 uikit 公开面。**ArkUI 命名坑在档**：组件 @Prop/方法不得与通用属性撞名（size/enabled/backgroundColor/fontColor/borderWidth/width/height/radius → btnSize/disabled/bgColor/textColor/outlineW/skelWidth…） |
+| 试点铺开 | ✅ | SessionDetail：审批选项 shadcn 语义（deny=描边红字；fullAccess 移出 brand 实底 → secondary，去危险授权视觉诱导）；chips/失败卡操作/自由文本发送 → ZButton；徽标 → ZBadge |
+| 门禁 | ✅ 33/33 + 构建 | 视觉效果待模拟器解锁人工验收（见批次23 阻塞记录） |
+| 遗留 | — | 批次25+：SessionList/Settings/Pairing 各页铺开、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2） |
+
 ## 11. 下一步（按顺序）
 
 1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；

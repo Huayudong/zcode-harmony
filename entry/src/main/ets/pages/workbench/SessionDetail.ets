@@ -32,7 +32,7 @@ import type {
   UsageQuotaLimitView,
 } from 'protocol';
 import { approvalOptionDescription, approvalOptionLabel } from 'protocol';
-import { ZcodeColors, StatusDot, StatusTone, ZIcon, ZIconName } from 'uikit';
+import { ZcodeColors, StatusDot, StatusTone, ZIcon, ZIconName, ZButton, ZButtonVariant, ZButtonSize, ZBadge, ZBadgeVariant } from 'uikit';
 import { mdBlockKey, parseMarkdownBlocks, type MdBlock, type MdSpan } from 'utils';
 
 /** 会话列表 → 会话页的路由参数（与 SessionList 侧同构）。 */
@@ -700,6 +700,7 @@ struct SessionDetail {
     }
   }
 
+  /** shadcn 语义（批次24）：allow 系=default 实底白字；deny=outline 红字；custom/fullAccess=secondary。 */
   private optionFontColor(item: PendingInteractionOptionView): string {
     if (item.kind === 'deny') {
       return ZcodeColors.DESTRUCTIVE;
@@ -707,14 +708,22 @@ struct SessionDetail {
     if (item.kind === 'allowOnce' || item.kind === 'allowAlways') {
       return '#FFFFFF';
     }
-    return ZcodeColors.textSecondary();
+    return ZcodeColors.textPrimary();
   }
 
   private optionBackground(item: PendingInteractionOptionView): string {
     if (item.kind === 'allowOnce' || item.kind === 'allowAlways') {
       return ZcodeColors.BRAND;
     }
+    if (item.kind === 'deny') {
+      return '#00000000';
+    }
     return ZcodeColors.SURFACE;
+  }
+
+  /** outline 形（deny 描边；其余 0）。 */
+  private optionBorderWidth(item: PendingInteractionOptionView): number {
+    return item.kind === 'deny' ? 1 : 0;
   }
 
   private secondsOf(ms: number): string {
@@ -889,16 +898,17 @@ struct SessionDetail {
 
   @Builder
   ModeChip(label: string, value: string) {
-    Text(label)
-      .fontSize(12)
-      .fontColor(this.currentMode() === value ? '#FFFFFF' : ZcodeColors.textSecondary())
-      .backgroundColor(this.currentMode() === value ? ZcodeColors.BRAND : Color.Transparent)
-      .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-      .borderRadius(999)
-      .opacity(this.switchBusy ? 0.5 : 1)
-      .onClick(() => {
+    // shadcn Button sm：选中 = default 实底，未选 = ghost（批次24）
+    ZButton({
+      label: label,
+      variant: this.currentMode() === value ? ZButtonVariant.DEFAULT : ZButtonVariant.GHOST,
+      btnSize: ZButtonSize.SM,
+      fontSize: 12,
+      disabled: this.switchBusy,
+      onTap: (): void => {
         void this.doSwitchMode(value);
-      })
+      },
+    })
   }
 
   /** 批次21：会话配置面板（模式/模型/思考档位；目录未就绪时降级只读当前值）。 */
@@ -1006,20 +1016,19 @@ struct SessionDetail {
           .width('100%')
         Row({ space: 6 }) {
           ForEach(this.thoughtLevelCandidates(), (level: string) => {
-            Text(level)
-              .fontSize(12)
-              .fontColor(this.sessionConfig !== null && this.sessionConfig.thought === level
-                ? '#FFFFFF' : ZcodeColors.textSecondary())
-              .backgroundColor(this.sessionConfig !== null && this.sessionConfig.thought === level
-                ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
-              .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-              .borderRadius(999)
-              .opacity(this.switchBusy ? 0.5 : 1)
-              .onClick(() => {
+            ZButton({
+              label: level,
+              variant: this.sessionConfig !== null && this.sessionConfig.thought === level
+                ? ZButtonVariant.DEFAULT : ZButtonVariant.GHOST,
+              btnSize: ZButtonSize.SM,
+              fontSize: 12,
+              disabled: this.switchBusy,
+              onTap: (): void => {
                 const provider = this.sessionConfig !== null ? this.sessionConfig.provider : '';
                 const model = this.sessionConfig !== null ? this.sessionConfig.model : '';
                 void this.doSwitchModel(provider, model, level);
-              })
+              },
+            })
           }, (level: string) => `${level}-${this.sessionConfig !== null && this.sessionConfig.thought === level ? 1 : 0}`)
         }
         .width('100%')
@@ -1356,20 +1365,13 @@ struct SessionDetail {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         if (this.blockKindLabel(item).length > 0) {
-          Text(this.blockKindLabel(item))
-            .fontSize(10)
-            .fontColor(ZcodeColors.BRAND_LIGHT)
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .borderRadius(6)
-            .backgroundColor('#1D2A4A')
+          ZBadge({ label: this.blockKindLabel(item), variant: ZBadgeVariant.DEFAULT })
         }
         if (item.originKind === 'subagent') {
-          Text(item.originAgentType.length > 0 ? `子代理·${item.originAgentType}` : '子代理')
-            .fontSize(10)
-            .fontColor(ZcodeColors.textSecondary())
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .borderRadius(6)
-            .backgroundColor(ZcodeColors.SURFACE)
+          ZBadge({
+            label: item.originAgentType.length > 0 ? `子代理·${item.originAgentType}` : '子代理',
+            variant: ZBadgeVariant.SECONDARY,
+          })
         }
         Blank()
         if (this.resolvingId === item.interactionId) {
@@ -1495,6 +1497,7 @@ struct SessionDetail {
             .padding({ left: 14, right: 14, top: 8, bottom: 8 })
             .borderRadius(10)
             .backgroundColor(this.optionBackground(option))
+            .border({ width: this.optionBorderWidth(option), color: ZcodeColors.BORDER })
             .margin({ right: 8, bottom: 8 })
             .enabled(this.resolvingId.length === 0)
             .onClick(() => {
@@ -1541,17 +1544,16 @@ struct SessionDetail {
               .onChange((value: string) => {
                 this.pendingFreeText = value;
               })
-            Button('发送')
-              .fontSize(13)
-              .fontColor(this.pendingFreeText.trim().length > 0 ? '#FFFFFF' : ZcodeColors.textTertiary())
-              .backgroundColor(this.pendingFreeText.trim().length > 0 ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
-              .borderRadius(10)
-              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-              .enabled(this.resolvingId.length === 0 && this.pendingFreeText.trim().length > 0)
-              .onClick(() => {
+            ZButton({
+              label: '发送',
+              variant: ZButtonVariant.DEFAULT,
+              btnSize: ZButtonSize.SM,
+              disabled: this.resolvingId.length > 0 || this.pendingFreeText.trim().length === 0,
+              onTap: (): void => {
                 const answer: ResolveAnswer = { freeText: this.pendingFreeText.trim() };
                 void this.resolve(item, answer);
-              })
+              },
+            })
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
@@ -1740,18 +1742,24 @@ struct SessionDetail {
             Text('回复生成失败')
               .fontSize(12)
               .fontColor(ZcodeColors.DESTRUCTIVE)
-            Text('重试本轮')
-              .fontSize(12)
-              .fontColor(ZcodeColors.BRAND_LIGHT)
-              .onClick(() => {
+            ZButton({
+              label: '重试本轮',
+              variant: ZButtonVariant.GHOST,
+              btnSize: ZButtonSize.SM,
+              fontSize: 12,
+              onTap: (): void => {
                 void this.retryFailedTurn(row);
-              })
-            Text('修改后重发')
-              .fontSize(12)
-              .fontColor(ZcodeColors.BRAND_LIGHT)
-              .onClick(() => {
+              },
+            })
+            ZButton({
+              label: '修改后重发',
+              variant: ZButtonVariant.GHOST,
+              btnSize: ZButtonSize.SM,
+              fontSize: 12,
+              onTap: (): void => {
                 this.startEditResend(row);
-              })
+              },
+            })
           }
           .padding({ left: 10, right: 10, top: 6, bottom: 6 })
           .borderRadius(10)
@@ -2229,6 +2237,8 @@ struct SessionDetail {
             Text('取消')
               .fontSize(11)
               .fontColor(ZcodeColors.textTertiary())
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .borderRadius(8)
               .onClick(() => {
                 this.cancelEdit();
               })
