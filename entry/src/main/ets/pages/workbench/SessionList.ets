@@ -1,10 +1,24 @@
 import router from '@ohos.router';
 import preferences from '@ohos.data.preferences';
-import { promptAction } from '@kit.ArkUI';
 import { WorkbenchController, type ConnectionStateEvent } from 'connection';
 import type { IDisposable } from 'protocol';
 import type { SessionSummaryView } from 'protocol';
-import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import {
+  LightBloomButton,
+  ZcodeColors,
+  DesignTokens,
+  StatusDot,
+  StatusTone,
+  ZBadge,
+  ZBadgeVariant,
+  ZButton,
+  ZButtonSize,
+  ZButtonVariant,
+  ZDialog,
+  ZInput,
+  ZSheet,
+  ZToast,
+} from 'uikit';
 
 /** 会话列表 → 会话页的路由参数。 */
 export interface SessionRouteParams {
@@ -17,8 +31,9 @@ interface SessionGroup {
   items: SessionSummaryView[];
 }
 
+/** 轻提示走 shadcn/Sonner 语义的全局 Toast（批次28）。 */
 function showToast(message: string): void {
-  promptAction.showToast({ message: message });
+  ZToast.show(message);
 }
 
 /**
@@ -37,8 +52,11 @@ struct SessionList {
   @State searchQuery: string = '';
   @State pinnedIds: string[] = [];
   @State actionsSessionId: string = '';
-  @State renaming: SessionSummaryView | null = null;
+  @State actionsTitle: string = '';
+  @State actionsPinned: boolean = false;
+  @State renamingId: string = '';
   @State renameText: string = '';
+  @State deleteId: string = '';
   private controller: WorkbenchController | null = null;
   private disposables: IDisposable[] = [];
   private pinnedPrefs: preferences.Preferences | null = null;
@@ -209,34 +227,46 @@ struct SessionList {
   }
 
   /** 删除会话：服务端权威删除，列表经 sessions-index delta 自愈。 */
-  private async confirmDelete(summary: SessionSummaryView): Promise<void> {
+  private async confirmDelete(sessionId: string): Promise<void> {
     if (this.controller === null) {
       return;
     }
     this.actionsSessionId = '';
+    this.deleteId = '';
     try {
-      await this.controller.deleteSession(summary.sessionId);
+      await this.controller.deleteSession(sessionId);
       showToast('已提交删除');
     } catch (error) {
       showToast(`删除失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  private startRename(summary: SessionSummaryView): void {
+  /** 打开长按菜单（记录标题/置顶态供菜单展示）。 */
+  private openActions(summary: SessionSummaryView): void {
+    if (this.actionsSessionId === summary.sessionId) {
+      this.actionsSessionId = '';
+      return;
+    }
+    this.actionsSessionId = summary.sessionId;
+    this.actionsTitle = this.titleOf(summary);
+    this.actionsPinned = this.isPinned(summary.sessionId);
+  }
+
+  private startRename(sessionId: string, title: string): void {
     this.actionsSessionId = '';
-    this.renaming = summary;
-    this.renameText = summary.title;
+    this.renamingId = sessionId;
+    this.renameText = title;
   }
 
   private async confirmRename(): Promise<void> {
-    const summary = this.renaming;
+    const sessionId = this.renamingId;
     const title = this.renameText.trim();
-    this.renaming = null;
-    if (summary === null || title.length === 0 || this.controller === null) {
+    this.renamingId = '';
+    if (sessionId.length === 0 || title.length === 0 || this.controller === null) {
       return;
     }
     try {
-      await this.controller.renameSession(summary.sessionId, title);
+      await this.controller.renameSession(sessionId, title);
       showToast('已提交重命名');
     } catch (error) {
       showToast(`重命名失败：${error instanceof Error ? error.message : String(error)}`);
@@ -369,9 +399,10 @@ struct SessionList {
         if (this.phaseLabel(summary).length > 0) {
           Row({ space: 5 }) {
             StatusDot({ tone: this.phaseTone(summary), dotSize: 7 })
-            Text(this.phaseLabel(summary))
-              .fontSize(11)
-              .fontColor(ZcodeColors.textSecondary())
+            ZBadge({
+              label: this.phaseLabel(summary),
+              variant: ZBadgeVariant.SECONDARY,
+            })
           }
           .alignItems(VerticalAlign.Center)
         }
@@ -386,39 +417,13 @@ struct SessionList {
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-
-      if (this.actionsSessionId === summary.sessionId) {
-        Row({ space: 12 }) {
-          Text(this.isPinned(summary.sessionId) ? '取消置顶' : '置顶')
-            .fontSize(12)
-            .fontColor(ZcodeColors.BRAND_LIGHT)
-            .onClick(() => {
-              void this.togglePin(summary.sessionId);
-            })
-          Text('重命名')
-            .fontSize(12)
-            .fontColor(ZcodeColors.BRAND_LIGHT)
-            .onClick(() => {
-              this.startRename(summary);
-            })
-          Text('删除')
-            .fontSize(12)
-            .fontColor(ZcodeColors.DESTRUCTIVE)
-            .onClick(() => {
-              void this.confirmDelete(summary);
-            })
-          Text('归档请用桌面端')
-            .fontSize(11)
-            .fontColor(ZcodeColors.textTertiary())
-        }
-        .width('100%')
-      }
     }
     .padding(14)
     .borderRadius(14)
     .backgroundColor(ZcodeColors.card())
+    .border({ width: 1, color: ZcodeColors.BORDER })
     .gesture(LongPressGesture({ repeat: false, duration: 500 }).onAction(() => {
-      this.actionsSessionId = this.actionsSessionId === summary.sessionId ? '' : summary.sessionId;
+      this.openActions(summary);
     }))
     .onClick(() => {
       if (this.actionsSessionId.length === 0) {
@@ -427,6 +432,52 @@ struct SessionList {
         this.actionsSessionId = '';
       }
     })
+  }
+
+  /** 长按菜单内容（shadcn Sheet 内的条目列表）。 */
+  @Builder
+  ActionMenu() {
+    Column() {
+      Text(this.actionsTitle.length > 0 ? this.actionsTitle : '会话')
+        .fontSize(12)
+        .fontColor(ZcodeColors.textTertiary())
+        .width('100%')
+        .margin({ bottom: 4 })
+
+      Text(this.actionsPinned ? '取消置顶' : '置顶')
+        .fontSize(15)
+        .fontColor(ZcodeColors.textPrimary())
+        .width('100%')
+        .padding({ top: 12, bottom: 12 })
+        .onClick(() => {
+          void this.togglePin(this.actionsSessionId);
+        })
+
+      Text('重命名')
+        .fontSize(15)
+        .fontColor(ZcodeColors.textPrimary())
+        .width('100%')
+        .padding({ top: 12, bottom: 12 })
+        .onClick(() => {
+          this.startRename(this.actionsSessionId, this.actionsTitle);
+        })
+
+      Text('删除')
+        .fontSize(15)
+        .fontColor(ZcodeColors.destructive())
+        .width('100%')
+        .padding({ top: 12, bottom: 12 })
+        .onClick(() => {
+          this.deleteId = this.actionsSessionId;
+        })
+
+      Text('归档请用桌面端（v4 协议暂无归档命令）')
+        .fontSize(11)
+        .fontColor(ZcodeColors.textTertiary())
+        .margin({ top: 4 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
@@ -468,48 +519,53 @@ struct SessionList {
           .layoutWeight(1)
 
           if (this.stateEvent.state !== 'online') {
-            Text('重试')
-              .fontSize(13)
-              .fontColor(ZcodeColors.BRAND_LIGHT)
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .borderRadius(10)
-              .backgroundColor(ZcodeColors.SURFACE)
-              .onClick(() => {
+            ZButton({
+              label: '重试',
+              variant: ZButtonVariant.SECONDARY,
+              btnSize: ZButtonSize.SM,
+              onTap: () => {
                 this.retryConnection();
-              })
+              },
+            })
           }
 
-          Text('＋')
-            .fontSize(22)
-            .fontColor(ZcodeColors.BRAND_LIGHT)
-            .margin({ right: 10 })
-            .onClick(() => {
+          ZButton({
+            label: '＋',
+            variant: ZButtonVariant.GHOST,
+            btnSize: ZButtonSize.ICON,
+            iconExtent: 36,
+            fontSize: 22,
+            onTap: () => {
               void this.createNewSession();
-            })
+            },
+          })
+          .margin({ right: 6 })
 
-          Text('⚙')
-            .fontSize(18)
-            .fontColor(ZcodeColors.textSecondary())
-            .onClick(() => {
+          ZButton({
+            label: '⚙',
+            variant: ZButtonVariant.GHOST,
+            btnSize: ZButtonSize.ICON,
+            iconExtent: 36,
+            fontSize: 18,
+            onTap: () => {
               router.pushUrl({ url: 'pages/settings/Settings' }).catch(() => {});
-            })
+            },
+          })
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 16, bottom: 12 })
         .alignItems(VerticalAlign.Center)
 
-        // A9：本地搜索
-        TextInput({ text: this.searchQuery, placeholder: '搜索会话标题…' })
-          .fontSize(13)
-          .fontColor(ZcodeColors.textPrimary())
-          .placeholderColor(ZcodeColors.textTertiary())
-          .backgroundColor(ZcodeColors.SURFACE)
-          .borderRadius(10)
-          .height(38)
-          .margin({ left: 16, right: 16, bottom: 8 })
-          .onChange((value: string) => {
+        // A9：本地搜索（shadcn Input 语义：聚焦时描边切 ring）
+        ZInput({
+          placeholder: '搜索会话标题…',
+          value: this.searchQuery,
+          fontSize: 13,
+          onValueChange: (value: string) => {
             this.searchQuery = value;
-          })
+          },
+        })
+        .margin({ left: 16, right: 16, bottom: 8 })
 
         if (this.sessions.length === 0) {
           Column({ space: 12 }) {
@@ -559,49 +615,84 @@ struct SessionList {
       .backgroundColor(ZcodeColors.background())
       .alignItems(HorizontalAlign.Center)
 
-      // 重命名浮层
-      if (this.renaming !== null) {
-        Column({ space: 12 }) {
-          Text('重命名会话')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(ZcodeColors.textPrimary())
-          TextInput({ text: this.renameText, placeholder: '新的会话标题' })
-            .fontSize(14)
-            .fontColor(ZcodeColors.textPrimary())
-            .backgroundColor(ZcodeColors.SURFACE)
-            .borderRadius(10)
-            .onChange((value: string) => {
+      // 重命名浮层（shadcn Dialog 语义：遮罩 + 居中面板 + 动作区）
+      if (this.renamingId.length > 0) {
+        ZDialog({
+          title: '重命名会话',
+          confirmLabel: '保存',
+          cancelLabel: '取消',
+          onConfirm: () => {
+            void this.confirmRename();
+          },
+          onCancel: () => {
+            this.renamingId = '';
+          },
+        }) {
+          ZInput({
+            placeholder: '新的会话标题',
+            value: this.renameText,
+            onValueChange: (value: string) => {
               this.renameText = value;
-            })
-          Row({ space: 12 }) {
-            Button('取消')
-              .fontSize(13)
-              .fontColor(ZcodeColors.textSecondary())
-              .backgroundColor(ZcodeColors.SURFACE)
-              .borderRadius(10)
-              .layoutWeight(1)
-              .onClick(() => {
-                this.renaming = null;
-              })
-            Button('确认')
-              .fontSize(13)
-              .fontColor('#FFFFFF')
-              .backgroundColor(ZcodeColors.BRAND)
-              .borderRadius(10)
-              .layoutWeight(1)
-              .enabled(this.renameText.trim().length > 0)
-              .onClick(() => {
-                void this.confirmRename();
-              })
-          }
-          .width('100%')
+            },
+          })
+          .margin({ top: 12 })
         }
-        .padding(16)
-        .borderRadius(16)
-        .backgroundColor(ZcodeColors.card())
-        .border({ width: 1, color: ZcodeColors.BRAND })
-        .margin({ left: 32, right: 32 })
+      }
+
+      // 长按操作菜单（shadcn Sheet 语义：底部抽屉 + 条目列表）
+      // 包裹层用原生 Stack：ArkUI 里自定义组件在 Stack 中的百分比高度解析为内容高度，
+      // 原生容器能拿到确定尺寸，overlay 才能铺满整屏（遮罩 + 贴底面板）。
+      if (this.actionsSessionId.length > 0) {
+        Stack() {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(DesignTokens.SCRIM)
+            .onClick(() => {
+              this.actionsSessionId = '';
+            })
+          ZSheet({
+            title: '会话操作',
+            onClose: () => {
+              this.actionsSessionId = '';
+            },
+          }) {
+            this.ActionMenu()
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .alignContent(Alignment.Bottom)
+      }
+
+      // 删除确认（shadcn AlertDialog 语义：破坏性动作二次确认）
+      if (this.deleteId.length > 0) {
+        Stack() {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(DesignTokens.SCRIM)
+            .onClick(() => {
+              this.deleteId = '';
+            })
+          ZDialog({
+            title: '删除会话',
+            message: '删除后不可恢复，确认删除该会话？',
+            confirmLabel: '删除',
+            cancelLabel: '取消',
+            destructive: true,
+            onConfirm: () => {
+              void this.confirmDelete(this.deleteId);
+            },
+            onCancel: () => {
+              this.deleteId = '';
+            },
+          }) {
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .alignContent(Alignment.Center)
       }
     }
     .width('100%')
