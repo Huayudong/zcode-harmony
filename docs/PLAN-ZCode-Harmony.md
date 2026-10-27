@@ -756,13 +756,29 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | **模拟器视觉通道** | ✅ **打通** | 本机 OpenHarmony **7.0.0.105 模拟器**已在 `127.0.0.1:5555` 在线（批次 23 的内存阻塞已解除）：unsigned HAP **install 成功** → `aa start EntryAbility` 启动 → 截图确认首页（未连接态）与配对引导页（ONB-1）渲染正常、交互可用（`uitest uiInput click` 生效）→ **批次 24 的 shadcn 暗色系（zinc 底 + 品牌蓝 + 光感泛光）首次拿到像素级证据**：`docs/preview-批次26-首页未连接.jpg` / `docs/preview-批次26-配对引导页.jpg`。**结论：模拟器视觉验收不需要签名**，批次 24 的视觉债就此清零 |
 | 预览渲染 | ⚠️ 未恢复 | 新 SDK 预览产物布局变了：JS 产物在 `loader_out/default/ets`（旧版 `assets/default/ets`），且无 `config/buildConfig.json`（`-cjp` 已移除）——脚本已按新布局更新。但引擎启动后仍缺系统 abc（`rpc.abc` / `windowstage.abc` 在整个 DevEco 安装里都不存在；SDK 26 预览器面向 API 20+/ark24，工程是 API 12）→ 预览通道需 API 12 兼容的旧 SDK。**但模拟器通道已可用，预览渲染不再是瓶颈** |
 | S1/S2/S4 全链路 | ⚠️ 待桌面端 | 模拟器侧就绪，但场景清单的 S1（扫码配对）/S2（外出批准）/S4（断网恢复）需要**电脑端 ZCode server** 在跑（本机无该进程、无 `E:\zcode-dev-data` 启动脚本、ZCode 仓未装依赖）→ 需先起 server |
+
+### Batch 27（2026-10-27）：桌面 server 拉起 + S1/S2 实机全通（模拟器，真实模型）
+
+> 批次 26 只把「构建 + 视觉」两条链打通；本批把电脑端 ZCode server 也拉起来，在模拟器上完成 S1/S2 的端到端实测（含真实模型流式回答与真实工具批准）。
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| server 起服踩坑（三处） | ✅ 已解 | ① **agent 进程 spawn 失败**：`spawn node_modules\.bin\tsx ENOENT`——Windows 下 `.bin/tsx` 是 shell shim 不能直接 spawn。解法：**构建 CLI 的 dist 入口**（`apps/zcode-cli/packages/cli/dist/zcode.cjs`），resolver 会改走 `process.execPath` 直启（31MB 产物；构建前须先构建 `@zcode/contracts`、`@zcode/adapters` 等 dist 依赖）② **构建期注入的 provider config**：`__ZCODE_BUILTIN_PROVIDER_CONFIG_JSON__` 由 tsup define 注入，需 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 指向**与分支同代**的 `config/provider/zcode-builtin.json`（本机环境变量指向的是 3.16.3 版本，schema 不兼容会报 "Invalid Built-in Provider config"）③ **Node 版本**：仓库要求 Node ≥24（`node:sqlite` / `fs/promises.glob`），本机 nvm 只有 20 → 改用 DevEco 自带 node 24 |
+| 服务端真实缺陷 | ✅ **已修** | 批次 20 的 fail-soft 补丁把 `deserialize(reader)` 收窄成 `as unknown[]` → `header[1..3]` 退化为 unknown，`packages/rpc` **typecheck 报 8 处 TS2322**（构建 CLI 时才暴露）。已改为 `const header = deserialize(reader);`（运行时行为不变，fail-soft 保留）。提交在 ZCode 仓分支 `fix/harmony-rpc-header-type`（commit e464ee09） |
+| **S1 首次配对** | ✅ **实通** | 深链 `zcode://pair?host=10.0.2.2&port=3030&token=…&fp=…&cert=…` 冷启动 → App 自动填充 host/port/配对码 → **「证书已通过指纹校验 ✓」**（SPKI SHA-256 == fp，cryptoFramework 本地校验）→ claim 换设备 token（存 Asset Store）→ HTTPS+WSS 双绿 → **进入工作台（已连接）**。截图：`docs/preview-批次27-配对页-指纹校验通过.jpg` / `docs/preview-批次27-工作台-已连接.jpg` |
+| **S2 外出批准** | ✅ **实通** | 手机端建会话 → 真实模型流式回答（provider 凭据可用，套餐余额探测成功）→ **Write 工具触发审批卡片**（批次 24 的 shadcn 语义清晰可见：允许/始终允许=品牌实心，**完全访问=secondary 描边**（去危险授权视觉诱导），**拒绝=红字描边**）→ 点允许 → CLI 实际执行 → **文件落盘 `harmony-check.txt`（内容 hello）** → 卡片坍缩为状态条 → 最终回答渲染（行内 code 着色）。截图：`docs/preview-批次27-S2审批卡片-shadcn语义.jpg` / `docs/preview-批次27-S2批准后-工具执行完成.jpg` |
+| OUT-5 变更 Tab | ✅ 实通 | 轮次 chips「变更 1（+1 −0）」+ 总览条「1 个文件 · +1 −0」+ 文件条目 `harmony-check.txt +1 −0 改动来源: Write`。截图：`docs/preview-批次27-变更Tab-diff卡片.jpg` |
+| 6.3 性能数据 | ⚠️ **仍欠** | `hilog -T PerfMarks` 在模拟器上取不到 app 的 info 级日志（缓冲里只有系统日志）→ 冷启动/会话打开/chunk 上屏/重连恢复四项仍无实测数字。这是 M1 准出的硬指标，**需真机或修埋点输出级别** |
+| 环境与复现 | ✅ | 桌面 server 跑在 **worktree** `E:\zcode-server-wt`（ZCode 仓 `origin/feature/harmony-0.1`，不动用户 main checkout）；数据目录隔离到 `E:\zcode-dev-data`（复制 `E:\Data\.zcode\v2` 的 provider 凭据，不写用户真实 profile）；起服命令：`ZCODE_DATA_BASE_DIR=E:/zcode-dev-data PORT=3030 ZCODE_SERVER_AUTH_TOKEN=… ZCODE_SERVER_TLS_SELF_SIGNED=1 node packages/server/dist/entry-http.js`（node 用 DevEco 自带 24） |
+| 门禁 | ✅ 33/33 + smoke | 本批为联调验证批，不触协议门禁 |
 | 门禁 | ✅ 33/33 + smoke | 本批为构建链修复，不触协议门禁；一致性门禁结果维持不变 |
 
 ## 11. 下一步（按顺序）
 
-1. **用户侧一次性动作**：DevEco → File → Project Structure → Signing Configs → 自动生成签名（需登录华为账号）→ 本机 HAP 即可安装到模拟器/真机；
-2. 模拟器/真机批：按 `docs/scene-checklist.md` 补跑批次 21/22 欠账 + 批次 24 视觉验收，产出 6.3 表实测数据；
-3. 预览通道二选一：装回 API 12 兼容的 DevEco（4.x）专供预览渲染，或接受「视觉验收只在模拟器/真机做」；
-4. 批次 27+：shadcn 铺开 SessionList/Settings/Pairing、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2）；
-5. 确认 §9 的 Q1-Q4（Q3 已按批次 16 的 ask→plan 口径落地，Q1/Q2/Q4 仍待产品/架构确认）；
-6. 本计划随里程碑推进滚动更新（每 Epic 准出时回写状态）。
+1. **6.3 性能实测**（M1 准出硬指标）：模拟器上 `hilog` 取不到 app 的 PerfMarks info 日志 → 需真机复测或把埋点级别提到 debug/stdout；
+2. **S4 断网恢复**实测：模拟器上关 Wi-Fi → 引擎入 backoff → 恢复后带水位重订阅（`docs/scene-checklist.md` 4-1~4-4）；
+3. 批次 21/22 欠账项对拍：workspace-config 真实 id 集、usage-stats 通道、审批内容与桌面逐向量对拍、editUserQuery 分支切换呈现；
+4. 批次 28+：shadcn 铺开 SessionList/Settings/Pairing、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2）；
+5. **真机安装**（可选）：DevEco → File → Project Structure → Signing Configs → 自动生成签名（需登录华为账号）——模拟器不校验签名，真机才需要；
+6. 确认 §9 的 Q1-Q4（Q3 已按批次 16 的 ask→plan 口径落地，Q1/Q2/Q4 仍待产品/架构确认）；
+7. 本计划随里程碑推进滚动更新（每 Epic 准出时回写状态）。
