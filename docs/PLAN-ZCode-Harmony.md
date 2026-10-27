@@ -726,9 +726,25 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁 | ✅ 33/33 + 构建 | 视觉效果待模拟器解锁人工验收（见批次23 阻塞记录） |
 | 遗留 | — | 批次25+：SessionList/Settings/Pairing 各页铺开、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2） |
 
+### Batch 25（2026-10-26）：门禁自证能力修复（维护批，不含功能）
+
+> 起因：批次 24 复查时发现「门禁 33/33 全绿」在当前仓库状态下**复现不出来**——换机/搬仓库后门禁直接挂，且批次 21 起的端到端用例本身是红的。本批把门禁修回「任何人 clone 下来跑 npm test 就能自证」。
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 夹具过期根因 | ✅ 已定位并修复 | 批次 21 给移植层加了 `onDynamicWorkspaceConfigFrame` 订阅（第三条通知面），但 `session-consistency.test.mjs` 的假 service 停在批次 7 未同步 → 原包 ProxyChannel 抛 `Event not found` → 端到端用例整条红。**真实服务端两侧分支的 `packages/services` 都有该事件**（`zcodeAgentService.ts:6706`），确认是测试夹具过期而非移植层回归 |
+| 夹具补全 | ✅ | 假 service 补 `onDynamicWorkspaceConfigFrame`（按 `workspace-config/` 前缀分流）+ `subscribeWorkspaceConfigV4`/`resyncWorkspaceConfigV4`/`unsubscribeWorkspaceConfigV4`（方法名与真实服务端逐字对齐）；端到端用例新增 5.8 段：订阅 → 配置目录帧 → 独立装配器分发 → **水位按订阅隔离**断言（workspace-config 的 lastSeq=1 不得污染 sessions-index 的 lastSeq=9）——夹具修复本身纳入门禁保护 |
+| 路径解析集中化 | ✅ | 新增 `tools/protocol-consistency/origin-paths.mjs`：原包仓路径按「环境变量 → 同级目录探测（ZCode/zcode/zcode-build）→ 历史默认位置」解析，找不到时抛**可执行提示**而非 ERR_MODULE_NOT_FOUND。测试文件与 `device-readiness.sh`、`render-page.sh`、`render-page.js` 一律按脚本自身位置推导仓库根（仓库已搬过两次家，写死路径必然再次失效） |
+| 门禁自举 | ✅ | 新增 `link-origin-workspace.mjs` + `pretest` 钩子：扫描实际加载的原包源收集 `@zcode/*` 裸导入，为其在测试 node_modules 建目录联接（Windows junction 免管理员权限）。原包仓的 workspace 包（如 `@zcode/model-option-map`）非公开、npm 装不上，没有这一步门禁必挂。**只链被引用的包**（当前 2 个），避免 npm install 反复清理噪音 |
+| 冒烟纳入门禁 | ✅ | `v4-smoke.test.mjs`（批次 6 起的 v4 schema 导入闭环冒烟）此前只能手工 `npx tsx` 跑，现接入 `npm test` 尾部（`npm run smoke`），随门禁一起守 |
+| lockfile 同步 | ✅ | `package.json` 声明了 zod 4.6.5 但 lockfile 未锁 → `npm ci` 会失败；本批补齐（12 行） |
+| 门禁结果 | ✅ 33/33 + smoke 5/5 | 从**零 bootstrap**（`rm -rf node_modules && npm ci && npm test`）实测通过；含端到端新增 5.8 段 |
+| 环境偏差 | ⚠️ | ① 本机未装 DevEco Studio / SDK，`assembleHap` 与预览渲染**无法复验**（批次 21/22/24 的「构建通过」结论沿用原记录，非本批重跑）；② 批次 23 的模拟器内存阻塞已缓解（可用虚拟内存 8.1GB vs 当时 1.4–1.8GB），但设备/SDK 不在本机，真机批仍待外部环境 |
+
 ## 11. 下一步（按顺序）
 
-1. 确认 §9 的 Q1-Q4（Q3 阻塞 A6 的 INP-6 spec）；
-2. 创建 `docs/specs/harmony/` 并完成 E1、E2 两份 spec（M1 W1 开工前置）；
-3. E7 测试基建 + E1 鉴权加固并行启动；鸿蒙仓完成脚手架与 zod spike（W1 门禁）；
-4. 本计划随里程碑推进滚动更新（每 Epic 准出时回写状态）。
+1. 装回 DevEco Studio / SDK，重跑 `assembleHap` 与预览渲染，恢复「构建 + 视觉」两条验证链（批次 24 的 shadcn 视觉验收正卡在此）；
+2. 真机批：按 `docs/scene-checklist.md` 补跑批次 21/22 欠账 + 批次 24 视觉验收，产出 6.3 表实测数据；
+3. 批次 26+：shadcn 铺开 SessionList/Settings/Pairing、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2）；
+4. 确认 §9 的 Q1-Q4（Q3 已按批次 16 的 ask→plan 口径落地，Q1/Q2/Q4 仍待产品/架构确认）；
+5. 本计划随里程碑推进滚动更新（每 Epic 准出时回写状态）。

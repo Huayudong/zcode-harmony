@@ -6,7 +6,7 @@
  * 装配层：同一组分片喂移植/原包 TopicWireFrameAssembler，产出逻辑帧一致；
  * 端到端：移植 AgentV4Client 对接原包 ChannelServer 假 host（握手/订阅/帧/水位/resync/命令幂等）。
  *
- * 原包路径默认 E:/program/zcode（F: 盘残缺安装已弃用）/{packages/rpc/src,packages/shared/src}，环境变量可覆盖。
+ * 原包路径由 origin-paths.mjs 统一解析（环境变量 → 同级目录探测 → 历史默认位置）。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,8 +14,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const ORIGIN_RPC = process.env.ZCODE_RPC_SRC ?? 'E:/program/zcode/packages/rpc/src';
-const ORIGIN_SHARED = process.env.ZCODE_SHARED_SRC ?? 'E:/program/zcode/packages/shared/src';
+import { ORIGIN_RPC, ORIGIN_SHARED } from './origin-paths.mjs';
 const PORT_RPC = path.resolve(import.meta.dirname, '../../commons/protocol/src/main/ets/rpc');
 const PORT_V4 = path.resolve(import.meta.dirname, '../../commons/protocol/src/main/ets/v4');
 
@@ -145,6 +144,19 @@ function fakeAgentService() {
     conversationRowsRangeV4() {
       return Promise.resolve({ rows: [], atSeq: 0, atRevision: 0, atLogEpoch: 'e', hasMore: false });
     },
+    // ── workspace-config（批次21 起的第三条通知面；移植层 connect 时即订阅其动态事件）──
+    subscribeWorkspaceConfigV4(params) {
+      calls.push({ method: 'subscribeWorkspaceConfigV4', params });
+      return Promise.resolve({ ack: { subscriptionId: 'sub-wc-1', mode: 'snapshot', logEpoch: 'epoch-wc-1' } });
+    },
+    resyncWorkspaceConfigV4(params) {
+      calls.push({ method: 'resyncWorkspaceConfigV4', params });
+      return Promise.resolve({ ack: { subscriptionId: 'sub-wc-1', mode: params.base ? 'resume' : 'snapshot', logEpoch: 'epoch-wc-2' } });
+    },
+    unsubscribeWorkspaceConfigV4() {
+      calls.push({ method: 'unsubscribeWorkspaceConfigV4' });
+      return Promise.resolve();
+    },
     sendConversationCommandV4(params) {
       calls.push({ method: 'sendConversationCommandV4', params });
       // 服务端用原包 zod 校验移植层生成的信封与 payload
@@ -170,6 +182,10 @@ function fakeAgentService() {
     },
     onDynamicConversationFrame() {
       return (listener) => frameEmitter.event((w) => { if (String(w && w.topic).startsWith('conversation/')) listener(w); });
+    },
+    onDynamicWorkspaceConfigFrame(target) {
+      calls.push({ method: 'onDynamicWorkspaceConfigFrame', target });
+      return (listener) => frameEmitter.event((w) => { if (String(w && w.topic).startsWith('workspace-config/')) listener(w); });
     },
     fire(wire) {
       frameEmitter.fire(wire);
@@ -205,6 +221,26 @@ function sessionsIndexFrameJson(subscriptionId, fromSeq, toSeq, sessions) {
         workspaceId: 'ws-1',
         logEpoch: 'epoch-si-1',
         sessions,
+      },
+    },
+  };
+}
+
+/** workspace-config 话题帧（批次21：模型/模式/档位目录的活性数据源）。 */
+function workspaceConfigFrameJson(subscriptionId, fromSeq, toSeq, config) {
+  return {
+    topic: 'workspace-config/ws-1',
+    subscriptionId,
+    fromSeq,
+    toSeq,
+    sentAt: 1_726_000_000_000,
+    payload: {
+      kind: 'snapshot',
+      snapshot: {
+        protocolVersion: 1,
+        workspaceId: 'ws-1',
+        logEpoch: 'epoch-wc-1',
+        config,
       },
     },
   };
@@ -539,6 +575,38 @@ test('端到端：握手版本锁 → 订阅 → 帧装配 → 水位 → resync
   queue.enqueue(stale);
   const expired = queue.dropExpired(1_800_000_000_000);
   assert.equal(expired.length, 1);
+
+  // 5.8 workspace-config 第三条通知面（批次21）：订阅 → 配置目录帧 → 独立装配器分发
+  // 回归点：批次21 给移植层加了这条订阅，但测试夹具未同步，导致 ProxyChannel 抛
+  // "Event not found: onDynamicWorkspaceConfigFrame"，端到端用例整条红。
+  const wcFrames = [];
+  client.onFrame((f) => wcFrames.push(f));
+  const wcAck = await client.subscribeWorkspaceConfig();
+  assert.equal(wcAck.subscriptionId, 'sub-wc-1');
+  const wcConfig = {
+    configOptions: [
+      {
+        id: 'model',
+        name: '模型',
+        type: 'select',
+        currentValue: 'gpt-5',
+        options: [{ value: 'gpt-5', name: 'GPT-5', origin: 'native' }],
+      },
+    ],
+    slashCommands: [{ name: 'help', description: '帮助' }],
+  };
+  service.fire(completeWire('workspace-config/ws-1', 'sub-wc-1', workspaceConfigFrameJson('sub-wc-1', 0, 1, wcConfig), 1));
+  await settle();
+  assert.equal(wcFrames.length, 1, 'workspace-config 帧应经独立装配器进入帧流水线');
+  assert.equal(wcFrames[0].topic, 'workspace-config/ws-1');
+  assert.equal(wcFrames[0].payload.kind, 'snapshot');
+  assert.equal(wcFrames[0].payload.snapshot.config.configOptions[0].currentValue, 'gpt-5');
+  // 水位记账按订阅隔离：workspace-config 的水位不得污染 sessions-index
+  const wm = client.watermarks();
+  const wc = wm.find((w) => w.subscriptionId === 'sub-wc-1');
+  assert.ok(wc, 'workspace-config 订阅应有独立水位');
+  assert.equal(wc.lastSeq, 1);
+  assert.equal(wm.find((w) => w.subscriptionId === 'sub-si-1').lastSeq, 9);
 
   client.close();
 });

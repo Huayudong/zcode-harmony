@@ -5,16 +5,32 @@
  *        预览产物的路由表（res/.../main_pages.json）可能因增量缓存过期，需与源码核对。
  */
 const fs = require('fs');
+const path = require('path');
 const { spawn, execSync } = require('child_process');
 
 const PAGE = process.argv[2];
 const OUT = process.argv[3];
 const WAIT_MS = Number(process.argv[4] || 12000);
 const BUILD_ROOT = process.argv[5] || '.preview';
-const ENGINE = 'D:/Huawei/DevEco Studio/sdk/default/openharmony/previewer/common/bin/Previewer.exe';
-const ROOT = 'E:/program/zcode-harmony';
+// 仓库根按脚本自身位置推导（仓库搬过家，写死路径会让渲染脚本空跑）。
+const ROOT = path.resolve(__dirname, '../..');
+// DevEco Studio 安装根：DEVECO_HOME 优先，否则按常见位置探测。
+const DEVECO = process.env.DEVECO_HOME || findDevEco();
+const ENGINE = DEVECO ? DEVECO + '/sdk/default/openharmony/previewer/common/bin/Previewer.exe' : '';
 const P = ROOT + '/entry/' + BUILD_ROOT;
 const ENGINE_LOG = ROOT + '/entry/' + BUILD_ROOT + '/engine.log';
+
+function findDevEco() {
+  const candidates = [
+    'D:/Huawei/DevEco Studio',
+    'C:/Program Files/Huawei/DevEco Studio',
+    process.env.USERPROFILE ? process.env.USERPROFILE + '/Huawei/DevEco Studio' : null,
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
 
 function engineArgs(pageUrl) {
   return [
@@ -31,7 +47,7 @@ function engineArgs(pageUrl) {
     '-d', '', '-abn', 'FakeUIAbility',
     '-abp', '@normalized:N&&&entry/' + BUILD_ROOT + '/fakeuiability/FakeUIAbility&',
     '-arp', P + '/default/intermediates/res/default',
-    '-hsp', 'D:/Huawei/DevEco Studio/sdk/default/hms/previewer',
+    '-hsp', (DEVECO ? DEVECO : 'D:/Huawei/DevEco Studio') + '/sdk/default/hms/previewer',
     '-cpm', 'false',
   ];
 }
