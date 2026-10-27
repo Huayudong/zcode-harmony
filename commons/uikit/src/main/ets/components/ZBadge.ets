@@ -24,19 +24,19 @@ export struct ZBadge {
   private bg(): string {
     if (this.variant === ZBadgeVariant.DEFAULT) {
       // primary 淡底（无 alpha 混色工具，用预混 zinc+brand 深）
-      return '#1D2A4A';
+      return DesignTokens.BADGE_INFO_BG;
     }
     if (this.variant === ZBadgeVariant.SUCCESS) {
       return ZcodeColors.DIFF_ADD;
     }
     if (this.variant === ZBadgeVariant.WARNING) {
-      return '#3A2F1A';
+      return DesignTokens.BADGE_WARNING_BG;
     }
     if (this.variant === ZBadgeVariant.DESTRUCTIVE) {
       return ZcodeColors.DIFF_DEL;
     }
     // secondary 淡底 / outline 透明
-    return this.variant === ZBadgeVariant.OUTLINE ? '#00000000' : ZcodeColors.SURFACE;
+    return this.variant === ZBadgeVariant.OUTLINE ? DesignTokens.TRANSPARENT : ZcodeColors.SURFACE;
   }
 
   private fg(): string {

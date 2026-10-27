@@ -58,7 +58,7 @@ export struct ZToastHost {
           .backgroundColor(ZcodeColors.CARD)
           .borderRadius(DesignTokens.RADIUS_MD)
           .border({ width: 1, color: ZcodeColors.BORDER })
-          .shadow({ radius: 16, color: '#66000000', offsetY: 4 })
+          .shadow({ radius: 16, color: DesignTokens.SHADOW, offsetY: 4 })
           .animation({ duration: Motion.DUR_MICRO, curve: Curve.EaseOut })
       }
     }

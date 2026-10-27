@@ -32,7 +32,7 @@ import type {
   UsageQuotaLimitView,
 } from 'protocol';
 import { approvalOptionDescription, approvalOptionLabel } from 'protocol';
-import { ZcodeColors, StatusDot, StatusTone, ZIcon, ZIconName, ZButton, ZButtonVariant, ZButtonSize, ZBadge, ZBadgeVariant } from 'uikit';
+import { ZcodeColors, DesignTokens, StatusDot, StatusTone, ZIcon, ZIconName, ZButton, ZButtonVariant, ZButtonSize, ZBadge, ZBadgeVariant } from 'uikit';
 import { mdBlockKey, parseMarkdownBlocks, type MdBlock, type MdSpan } from 'utils';
 
 /** 会话列表 → 会话页的路由参数（与 SessionList 侧同构）。 */
@@ -716,7 +716,7 @@ struct SessionDetail {
       return ZcodeColors.BRAND;
     }
     if (item.kind === 'deny') {
-      return '#00000000';
+      return DesignTokens.TRANSPARENT;
     }
     return ZcodeColors.SURFACE;
   }
@@ -982,7 +982,7 @@ struct SessionDetail {
               .padding({ left: 10, right: 10, top: 7, bottom: 7 })
               .borderRadius(10)
               .backgroundColor(this.sessionConfig !== null && this.sessionConfig.model === value.value
-                ? ZcodeColors.SURFACE : '#00000000')
+                ? ZcodeColors.SURFACE : DesignTokens.TRANSPARENT)
               .opacity(this.switchBusy ? 0.5 : 1)
               .onClick(() => {
                 const provider = value.providerId.length > 0
@@ -1305,7 +1305,7 @@ struct SessionDetail {
         .fontWeight(this.activeTab === index ? FontWeight.Medium : FontWeight.Normal)
         .fontColor(this.activeTab === index ? ZcodeColors.textPrimary() : ZcodeColors.textTertiary())
       Divider()
-        .color(this.activeTab === index ? ZcodeColors.BRAND : '#00000000')
+        .color(this.activeTab === index ? ZcodeColors.BRAND : DesignTokens.TRANSPARENT)
         .strokeWidth(2)
         .width(28)
     }
@@ -1955,7 +1955,7 @@ struct SessionDetail {
                 .fontColor(line.startsWith('+') ? ZcodeColors.SUCCESS
                   : (line.startsWith('-') ? ZcodeColors.DESTRUCTIVE : ZcodeColors.textSecondary()))
                 .backgroundColor(line.startsWith('+') ? ZcodeColors.DIFF_ADD
-                  : (line.startsWith('-') ? ZcodeColors.DIFF_DEL : '#00000000'))
+                  : (line.startsWith('-') ? ZcodeColors.DIFF_DEL : DesignTokens.TRANSPARENT))
                 .width('100%')
                 .padding({ left: 8, right: 8, top: 1, bottom: 1 })
             }, (line: string, lineIndex: number) => `${hunkIndex}-${lineIndex}-${line}`)
@@ -2300,7 +2300,7 @@ struct SessionDetail {
               .fontSize(14)
               .fontColor(ZcodeColors.textPrimary())
               .placeholderColor(ZcodeColors.textTertiary())
-              .backgroundColor('#00000000')
+              .backgroundColor(DesignTokens.TRANSPARENT)
               .constraintSize({ maxHeight: 156 })
               .padding({ left: 4, right: 4 })
               .onFocus(() => {
@@ -2355,7 +2355,7 @@ struct SessionDetail {
               })
                 .padding({ left: 6, right: 6, top: 4, bottom: 4 })
                 .borderRadius(999)
-                .backgroundColor(this.usagePanelOpen ? ZcodeColors.BRAND : '#00000000')
+                .backgroundColor(this.usagePanelOpen ? ZcodeColors.BRAND : DesignTokens.TRANSPARENT)
                 .onClick(() => {
                   this.toggleUsagePanel();
                 })
@@ -2379,7 +2379,7 @@ struct SessionDetail {
             offsetY: 0,
           } : {
             radius: 0,
-            color: '#00000000',
+            color: DesignTokens.TRANSPARENT,
             offsetX: 0,
             offsetY: 0,
           })
@@ -2389,7 +2389,7 @@ struct SessionDetail {
             Button(this.stopArmed ? '停止?' : '⏹')
               .fontSize(this.stopArmed ? 12 : 16)
               .fontColor(ZcodeColors.DESTRUCTIVE)
-              .backgroundColor('#00000000')
+              .backgroundColor(DesignTokens.TRANSPARENT)
               .border({ width: 1.5, color: ZcodeColors.DESTRUCTIVE })
               .width(48)
               .height(48)

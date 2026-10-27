@@ -55,7 +55,7 @@ export struct ZButton {
       return ZcodeColors.BRAND_CONTRAST;
     }
     if (this.variant === ZButtonVariant.DESTRUCTIVE) {
-      return '#FFFFFF';
+      return ZcodeColors.BRAND_CONTRAST;
     }
     return ZcodeColors.textPrimary();
   }
@@ -74,7 +74,7 @@ export struct ZButton {
       return ZcodeColors.DESTRUCTIVE;
     }
     // outline / ghost：完全透明（8 位 ARGB）
-    return '#00000000';
+    return DesignTokens.TRANSPARENT;
   }
 
   private outlineW(): number {

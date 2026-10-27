@@ -31,6 +31,13 @@ export class DesignTokens {
   static readonly COLOR_CONFIRM: string = '#3FBF6E';
   /** overlay 遮罩（shadcn Dialog/Sheet 的 overlay 半透黑）。 */
   static readonly SCRIM: string = '#00000099';
+  /** 完全透明（ArkUI 颜色串只能是 string，Color.Transparent 是枚举不通用）。 */
+  static readonly TRANSPARENT: string = '#00000000';
+  /** 浮层投影（Sonner 式柔和阴影）。 */
+  static readonly SHADOW: string = '#66000000';
+  /** ZBadge 变体底色：info 蓝调 / warning 琥珀调（shadcn badge 的 muted 变体）。 */
+  static readonly BADGE_INFO_BG: string = '#1D2A4A';
+  static readonly BADGE_WARNING_BG: string = '#3A2F1A';
   /** 品牌辉光（shadow/粒子用的 rgba 串；ArkTS shadow.color 只收字符串或 Color）。 */
   static readonly GLOW_BRAND: string = 'rgba(76, 125, 255, 0.35)';
   static readonly GLOW_BRAND_SOFT: string = 'rgba(76, 125, 255, 0.18)';
