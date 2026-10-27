@@ -54,7 +54,75 @@ shadcn 是 React/Tailwind 技术栈，不能直接运行在鸿蒙 ArkTS 上—�
 - ZTabs/ZToast/ZAvatar/ZSwitch 按需增补；
 - 浅色主题（shadcn light 值）走资源化，token 键名不动（M2）。
 
+---
+
+# 批次28 Spec：shadcn 组件补全 + 全页铺开（第二阶段）
+
+> 批次24 只做了 token 层 + 3 个组件 + 1 页试点。本批把组件层补到覆盖交互与
+> 表单件，并把 SessionList / Settings / Pairing 三页 / Index 全部铺开，
+> 裸 hex 收敛到「只存在于 token 定义文件」。
+
+## 新增组件（uikit 公开面）
+
+| 组件 | shadcn 对位 | 关键语义 |
+| --- | --- | --- |
+| ZDialog | Dialog / AlertDialog | 遮罩 + 居中面板（--card + --border）；动作区右对齐（取消 ghost / 确认 default）；destructive 变体走红底确认 |
+| ZSheet | Sheet | 底部抽屉（顶部圆角 + --border）；标题栏带关闭态；内容走插槽 |
+| ZSwitch | Switch | 覆写 Toggle 系统外观为 --primary 轨道 + 白拇指 |
+| ZInput / ZTextarea | Input / Textarea | --card 底 + --input 描边，聚焦切 --ring（focus-visible ring） |
+| ZTabs | Tabs（underline 变体） | 选中 --foreground + 2px --primary 指示条，未选中无底色 |
+| ZToast + ZToastHost | Sonner | AppStorage 全局，2.6s 自动消失；宿主挂在页面根 |
+
+DesignTokens 补：SCRIM（遮罩）/ TRANSPARENT / SHADOW / BADGE_INFO_BG /
+BADGE_WARNING_BG。
+
+## 页面铺开
+
+- **SessionList**：长按菜单 → ZSheet（原先是卡片内联文字行）；删除会话 → 新增
+  AlertDialog 二次确认（原先直接提交，不可撤销）；重命名浮层 → ZDialog + ZInput；
+  会话卡片补 --border 描边；阶段徽标 → ZBadge；头部三按钮 → ZButton；搜索框 →
+  ZInput；轻提示 → ZToast。
+- **Settings**：根节点 Column → Stack（overlay 需 Stack 才能盖满并居中）；通知
+  分级三档 → ZButton ToggleGroup 语义（选中 default / 未选 outline）；重连/
+  设为活跃/重新配对 → ZButton；当前活跃 → ZBadge(success)；清除缓存 →
+  ZButton(outline) + AlertDialog 破坏性确认。
+- **Pairing 三页**：返回/组网指引 → ZButton(ghost)；主行动保留 LightBloomButton
+  （PRD 5.4 光感只给主行动），次要行动 → ZButton(secondary)；推荐卡片补描边 +
+  ZBadge；四个输入框 → ZInput。
+- **Index**：挂 ZToastHost，全 App 轻提示统一走 AppStorage。
+- **SessionDetail**：10 处裸 hex 清零（批次24 遗留）。
+
+## ArkUI 转译坑（实测，跨批复用）
+
+1. 装饰器名是 **`@BuilderParam`**（不是 `@PropBuilderParam`）。写错名字会退化成
+   普通未初始化字段并报 10605999「no initializer」。
+2. `@Prop`/方法不得与**通用属性**撞名：`onChange`（TextInput/Toggle 通用属性）→
+   `onValueChange`；Tabs 的 `onChange` → `onIndexChange`（批次24 已记 size/enabled
+   一类，同类坑）。
+3. `Stack` **没有** alignItems/justifyContent（那是 Flex/Column 的）；定位用子节点
+   `.align(Alignment.*)`，Stack 整体对齐用 `.alignContent(Alignment.*)`。
+4. **自定义组件在 Stack 中按内容尺寸布局**：组件内部的百分比高度会解析成内容高度，
+   overlay 无法自行铺满整屏（实测：加了 `.width('100%').height('100%')` 仍只按
+   内容高，且面板不贴底）。解法：**overlay 组件只渲染面板**，遮罩与对齐交给宿主
+   侧的原生容器（原生子节点的百分比高度才生效）。
+5. 带尾随闭包的组件调用（`Xxx({...}) { ... }`）之后**不能链式调用属性**——要用
+   插槽就改用 init 对象传 builder。
+6. `@Builder` 内**不能写语句**（如 `const x = ...`），且 null 对象在 @Builder 里取
+   字段不可靠 → 状态字段改用基本类型（id/text/flag）。
+
 ## 验证
 
-门禁 33/33（UI 批无新增向量）+ hvigor 构建通过。视觉效果待模拟器解锁后人工验收
-（批次23 联调阻塞记录了环境解锁路径）。
+- 门禁 33/33 + v4 smoke 5/5；
+- hvigor 构建 BUILD SUCCESSFUL（ArkTS 零错误）；
+- 模拟器实测截图：`docs/preview-批次28-会话长按Sheet.jpg` /
+  `docs/preview-批次28-设置页-ToggleGroup语义.jpg` /
+  `docs/preview-批次28-破坏性AlertDialog.jpg`；
+- 裸 hex 审计：全仓仅 DesignTokens / ZcodeColors 两个 token 定义文件含 hex。
+
+## 遗留（批次29+）
+
+- ZTabs 尚未接入页面（SessionDetail 的三 Tab 仍是页面内自绘 TabButton）；
+- ZSwitch/ZTextarea 组件已备但暂无对应设置项（M2 的浅色主题与字体档位会用）；
+- 浅色主题（shadcn light 值）走资源化，token 键名不动（M2）；
+- 剩余 shadcn 组件（DropdownMenu / Select / Checkbox / Tooltip / Popover /
+  Card / Avatar / Progress / Separator / ScrollArea / Command 等）按需增补。

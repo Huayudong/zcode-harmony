@@ -771,6 +771,23 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 6.3 性能数据 | ⚠️ **仍欠** | `hilog -T PerfMarks` 在模拟器上取不到 app 的 info 级日志（缓冲里只有系统日志）→ 冷启动/会话打开/chunk 上屏/重连恢复四项仍无实测数字。这是 M1 准出的硬指标，**需真机或修埋点输出级别** |
 | 环境与复现 | ✅ | 桌面 server 跑在 **worktree** `E:\zcode-server-wt`（ZCode 仓 `origin/feature/harmony-0.1`，不动用户 main checkout）；数据目录隔离到 `E:\zcode-dev-data`（复制 `E:\Data\.zcode\v2` 的 provider 凭据，不写用户真实 profile）；起服命令：`ZCODE_DATA_BASE_DIR=E:/zcode-dev-data PORT=3030 ZCODE_SERVER_AUTH_TOKEN=… ZCODE_SERVER_TLS_SELF_SIGNED=1 node packages/server/dist/entry-http.js`（node 用 DevEco 自带 24） |
 | 门禁 | ✅ 33/33 + smoke | 本批为联调验证批，不触协议门禁 |
+
+### Batch 28（2026-10-27）：shadcn/ui 转译第二阶段——组件补全 + 全页铺开（App）
+
+> 批次24 的 shadcn 裁决只落地到「token 全局切换 + 3 个组件 + 1 页试点」。
+> 本批把组件层补到覆盖交互/表单件，并把剩余页面全部铺开，裸 hex 收敛到
+> 「只存在于 token 定义文件」。
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 组件补全 | ✅ | 新增 **ZDialog**（Dialog/AlertDialog）、**ZSheet**（Sheet）、**ZSwitch**、**ZInput**、**ZTextarea**、**ZTabs**、**ZToast + ZToastHost**（Sonner）——shadcn 官方 40+ 组件的常用子集，本仓现有 10 个 |
+| SessionList 铺开 | ✅ | 长按菜单→ZSheet；**删除会话新增 AlertDialog 二次确认**（原先直删不可撤销，是真实风险）；重命名浮层→ZDialog+ZInput；卡片补 --border 描边；阶段徽标→ZBadge；头部按钮/搜索框→ZButton/ZInput；提示→ZToast |
+| Settings 铺开 | ✅ | 根节点 Column→Stack；通知分级三档→**ZButton ToggleGroup 语义**（选中实底/未选描边）；重连/设为活跃/重新配对→ZButton；当前活跃→ZBadge；清除缓存→ZButton(outline)+AlertDialog 破坏性确认 |
+| Pairing 三页铺开 | ✅ | 返回/组网指引→ZButton(ghost)；主行动保留 LightBloomButton（PRD 5.4 光感只给主行动），次要行动→ZButton(secondary)；推荐卡片补描边+ZBadge；4 个输入框→ZInput |
+| Index | ✅ | 挂 ZToastHost，全 App 轻提示统一走 AppStorage |
+| 裸 hex 清零 | ✅ | SessionDetail 遗留 10 处 + uikit 组件内部若干，全仓裸 hex 只剩 DesignTokens / ZcodeColors 两个 token 定义文件（与 shadcn「颜色只在 CSS 变量定义一次」一致） |
+| ArkUI 转译坑 | ✅ 在档 | `@BuilderParam`（非 @PropBuilderParam）；`onChange` 撞通用属性；Stack 无 alignItems；**自定义组件在 Stack 中按内容尺寸布局**（overlay 必须只渲染面板、遮罩与对齐交宿主原生容器）；尾随闭包后不能链式属性；@Builder 内不能写语句 |
+| 门禁 | ✅ 33/33 + smoke 5/5 | hvigor BUILD SUCCESSFUL（ArkTS 零错误）；模拟器实测截图 3 张（`docs/preview-批次28-*.jpg`） |
 | 门禁 | ✅ 33/33 + smoke | 本批为构建链修复，不触协议门禁；一致性门禁结果维持不变 |
 
 ## 11. 下一步（按顺序）
