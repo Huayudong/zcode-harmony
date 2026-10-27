@@ -29,6 +29,8 @@ export class DesignTokens {
   static readonly COLOR_DIFF_DEL: string = '#3A1F24';
   static readonly COLOR_TRACE: string = '#2A3A55';
   static readonly COLOR_CONFIRM: string = '#3FBF6E';
+  /** overlay 遮罩（shadcn Dialog/Sheet 的 overlay 半透黑）。 */
+  static readonly SCRIM: string = '#00000099';
   /** 品牌辉光（shadow/粒子用的 rgba 串；ArkTS shadow.color 只收字符串或 Color）。 */
   static readonly GLOW_BRAND: string = 'rgba(76, 125, 255, 0.35)';
   static readonly GLOW_BRAND_SOFT: string = 'rgba(76, 125, 255, 0.18)';
