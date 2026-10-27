@@ -706,7 +706,7 @@ struct SessionDetail {
       return ZcodeColors.DESTRUCTIVE;
     }
     if (item.kind === 'allowOnce' || item.kind === 'allowAlways') {
-      return '#FFFFFF';
+      return ZcodeColors.BRAND_CONTRAST;
     }
     return ZcodeColors.textPrimary();
   }
@@ -982,7 +982,7 @@ struct SessionDetail {
               .padding({ left: 10, right: 10, top: 7, bottom: 7 })
               .borderRadius(10)
               .backgroundColor(this.sessionConfig !== null && this.sessionConfig.model === value.value
-                ? ZcodeColors.SURFACE : Color.Transparent)
+                ? ZcodeColors.SURFACE : '#00000000')
               .opacity(this.switchBusy ? 0.5 : 1)
               .onClick(() => {
                 const provider = value.providerId.length > 0
@@ -1305,7 +1305,7 @@ struct SessionDetail {
         .fontWeight(this.activeTab === index ? FontWeight.Medium : FontWeight.Normal)
         .fontColor(this.activeTab === index ? ZcodeColors.textPrimary() : ZcodeColors.textTertiary())
       Divider()
-        .color(this.activeTab === index ? ZcodeColors.BRAND : Color.Transparent)
+        .color(this.activeTab === index ? ZcodeColors.BRAND : '#00000000')
         .strokeWidth(2)
         .width(28)
     }
@@ -1710,7 +1710,7 @@ struct SessionDetail {
           Blank()
           Text(row.text)
             .fontSize(15)
-            .fontColor('#FFFFFF')
+            .fontColor(ZcodeColors.BRAND_CONTRAST)
             .padding({ left: 14, right: 14, top: 10, bottom: 10 })
             .borderRadius(14)
             .backgroundColor(ZcodeColors.BRAND)
@@ -1955,7 +1955,7 @@ struct SessionDetail {
                 .fontColor(line.startsWith('+') ? ZcodeColors.SUCCESS
                   : (line.startsWith('-') ? ZcodeColors.DESTRUCTIVE : ZcodeColors.textSecondary()))
                 .backgroundColor(line.startsWith('+') ? ZcodeColors.DIFF_ADD
-                  : (line.startsWith('-') ? ZcodeColors.DIFF_DEL : Color.Transparent))
+                  : (line.startsWith('-') ? ZcodeColors.DIFF_DEL : '#00000000'))
                 .width('100%')
                 .padding({ left: 8, right: 8, top: 1, bottom: 1 })
             }, (line: string, lineIndex: number) => `${hunkIndex}-${lineIndex}-${line}`)
@@ -1995,7 +1995,7 @@ struct SessionDetail {
             ForEach(this.turns, (turn: ConversationRowView, index: number) => {
               Text(`变更 ${index + 1}（+${turn.fileAdditions} −${turn.fileDeletions}）`)
                 .fontSize(12)
-                .fontColor(this.selectedTurnRowId === turn.rowId ? '#FFFFFF' : ZcodeColors.textSecondary())
+                .fontColor(this.selectedTurnRowId === turn.rowId ? ZcodeColors.BRAND_CONTRAST : ZcodeColors.textSecondary())
                 .backgroundColor(this.selectedTurnRowId === turn.rowId ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
                 .borderRadius(999)
@@ -2193,7 +2193,7 @@ struct SessionDetail {
         if (!this.atBottom) {
           Text('↓ 回到底部')
             .fontSize(12)
-            .fontColor('#FFFFFF')
+            .fontColor(ZcodeColors.BRAND_CONTRAST)
             .padding({ left: 14, right: 14, top: 8, bottom: 8 })
             .borderRadius(999)
             .backgroundColor(ZcodeColors.BRAND)
@@ -2246,7 +2246,7 @@ struct SessionDetail {
           .width('100%')
           .padding({ left: 10, right: 10, top: 5, bottom: 5 })
           .borderRadius(8)
-          .backgroundColor('#1D2A4A')
+          .backgroundColor(ZcodeColors.SURFACE)
           .margin({ left: 16, right: 16 })
         }
 
@@ -2300,7 +2300,7 @@ struct SessionDetail {
               .fontSize(14)
               .fontColor(ZcodeColors.textPrimary())
               .placeholderColor(ZcodeColors.textTertiary())
-              .backgroundColor(Color.Transparent)
+              .backgroundColor('#00000000')
               .constraintSize({ maxHeight: 156 })
               .padding({ left: 4, right: 4 })
               .onFocus(() => {
@@ -2334,11 +2334,11 @@ struct SessionDetail {
               Row({ space: 4 }) {
                 Text(this.modeLabel(this.currentMode()))
                   .fontSize(11)
-                  .fontColor(this.configPanelOpen ? '#FFFFFF' : ZcodeColors.textSecondary())
+                  .fontColor(this.configPanelOpen ? ZcodeColors.BRAND_CONTRAST : ZcodeColors.textSecondary())
                 ZIcon({
                   name: ZIconName.ChevronUp,
                   iconSize: 11,
-                  color: this.configPanelOpen ? '#FFFFFF' : ZcodeColors.textTertiary(),
+                  color: this.configPanelOpen ? ZcodeColors.BRAND_CONTRAST : ZcodeColors.textTertiary(),
                 })
               }
               .padding({ left: 10, right: 10, top: 4, bottom: 4 })
@@ -2351,11 +2351,11 @@ struct SessionDetail {
               ZIcon({
                 name: ZIconName.Usage,
                 iconSize: 15,
-                color: this.usagePanelOpen ? '#FFFFFF' : ZcodeColors.textTertiary(),
+                color: this.usagePanelOpen ? ZcodeColors.BRAND_CONTRAST : ZcodeColors.textTertiary(),
               })
                 .padding({ left: 6, right: 6, top: 4, bottom: 4 })
                 .borderRadius(999)
-                .backgroundColor(this.usagePanelOpen ? ZcodeColors.BRAND : Color.Transparent)
+                .backgroundColor(this.usagePanelOpen ? ZcodeColors.BRAND : '#00000000')
                 .onClick(() => {
                   this.toggleUsagePanel();
                 })
@@ -2379,7 +2379,7 @@ struct SessionDetail {
             offsetY: 0,
           } : {
             radius: 0,
-            color: Color.Transparent,
+            color: '#00000000',
             offsetX: 0,
             offsetY: 0,
           })
@@ -2389,7 +2389,7 @@ struct SessionDetail {
             Button(this.stopArmed ? '停止?' : '⏹')
               .fontSize(this.stopArmed ? 12 : 16)
               .fontColor(ZcodeColors.DESTRUCTIVE)
-              .backgroundColor(Color.Transparent)
+              .backgroundColor('#00000000')
               .border({ width: 1.5, color: ZcodeColors.DESTRUCTIVE })
               .width(48)
               .height(48)
@@ -2401,7 +2401,7 @@ struct SessionDetail {
           } else {
             Button(this.sending ? '…' : '↑')
               .fontSize(20)
-              .fontColor(this.inputText.trim().length > 0 && !this.sending ? '#FFFFFF' : ZcodeColors.textTertiary())
+              .fontColor(this.inputText.trim().length > 0 && !this.sending ? ZcodeColors.BRAND_CONTRAST : ZcodeColors.textTertiary())
               .backgroundColor(this.inputText.trim().length > 0 && !this.sending ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
               .width(48)
               .height(48)
