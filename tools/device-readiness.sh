@@ -14,8 +14,10 @@ find_hdc() {
     echo "${ZCODE_HDC}"; return
   fi
   local candidates=(
+    "D:/DevEco Studio/sdk/default/openharmony/toolchains/hdc"
     "D:/Huawei/DevEco Studio/sdk/default/openharmony/toolchains/hdc"
     "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/toolchains/hdc"
+    "C:/Program Files/DevEco Studio/sdk/default/openharmony/toolchains/hdc"
     "$REPO_ROOT/sdk/default/openharmony/toolchains/hdc"
     "$HOME/Huawei/DevEco Studio/sdk/default/openharmony/toolchains/hdc"
   )

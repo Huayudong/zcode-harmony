@@ -741,10 +741,28 @@ M4 公测上架：A13 合规材料（软著/隐私标签/生成内容定位说�
 | 门禁结果 | ✅ 33/33 + smoke 5/5 | 从**零 bootstrap**（`rm -rf node_modules && npm ci && npm test`）实测通过；含端到端新增 5.8 段 |
 | 环境偏差 | ⚠️ | ① 本机未装 DevEco Studio / SDK，`assembleHap` 与预览渲染**无法复验**（批次 21/22/24 的「构建通过」结论沿用原记录，非本批重跑）；② 批次 23 的模拟器内存阻塞已缓解（可用虚拟内存 8.1GB vs 当时 1.4–1.8GB），但设备/SDK 不在本机，真机批仍待外部环境 |
 
+### Batch 26（2026-10-27）：构建链恢复——DevEco 26 迁移与可复现构建脚本（App）
+
+> 起因：DevEco 装到了新机器（`D:/DevEco Studio`，SDK 26.0.0 / API 26），原构建链三处全断：ohpm 跑不起来、schema 校验拒绝 `appIdentifier`、签名材料指向旧机路径。本批把「构建」这条验证链从零恢复，并固化成脚本。
+
+| 项 | 状态 | 产物 |
+| --- | --- | --- |
+| 环境事实 | ✅ | DevEco Studio 26.0.0.630 装在 `D:/DevEco Studio`（**不是**旧的 `D:/Huawei/DevEco Studio`）；SDK `HarmonyOS-26.0.0.105`（apiVersion 26）；工程仍 target `5.0.0(12)` |
+| ohpm 修复 | ✅ | **必须用 DevEco 自带 node 24**（`tools/node/node.exe`）跑 ohpm——系统 node 20 无法 `require` ohpm 内 ESM-only 的 `uuid`（ERR_REQUIRE_ESM），ohpm 自身直接崩 |
+| appIdentifier schema | ✅ | `AppScope/app.json5` 的 `appIdentifier` 被 SDK 26 的 `modulecheck/app.json` 拒绝（4 个 bundleType 分支的 propertyNames.enum 均无此键）。SDK 目录对普通用户只有 RX → **新增影子 SDK 模式**：`node tools/patch-sdk-app-schema.cjs --shadow <目录>` 用目录联接镜像真实 SDK（文件走硬链接、零拷贝），仅 `modulecheck` 复制为实体并注入 `appIdentifier`，构建时 `DEVECO_SDK_HOME` 指向影子即可，**免管理员权限** |
+| 构建 | ✅ **BUILD SUCCESSFUL** | `assembleHap` 62→65 任务全过，产出 `entry/build/default/outputs/default/entry-default-unsigned.hap`（3.19MB，ZIP 头正常，含 module.json / resources.index / ets/modules.abc）。ArkTS 编译零错误（仅 3 条 API 12 deprecation 警告：`back` / `pushUrl` / 异常处理提示） |
+| 可复现脚本 | ✅ | 新增 `tools/deveco-env.sh`（DevEco/SDK/影子 SDK 统一解析，被构建与预览脚本共用）+ `tools/build-hap.sh`（依赖检查 → SDK schema 校验 → hvigor assembleHap → 产物清单）。`--unsigned` 临时清空 signingConfigs 并在构建后自动还原 |
+| 签名 | ⚠️ **真机待用户** | `build-profile.json5` 的签名材料指向**旧机** `C:\Users\Administrator\.ohos\config\*.p12`（本机不存在，SignHap 报 00303107）。真机安装需在 DevEco 里 File → Project Structure → Signing Configs 勾选自动生成（需登录华为账号）。**但模拟器不校验签名**——unsigned HAP 直接装上（见下） |
+| **模拟器视觉通道** | ✅ **打通** | 本机 OpenHarmony **7.0.0.105 模拟器**已在 `127.0.0.1:5555` 在线（批次 23 的内存阻塞已解除）：unsigned HAP **install 成功** → `aa start EntryAbility` 启动 → 截图确认首页（未连接态）与配对引导页（ONB-1）渲染正常、交互可用（`uitest uiInput click` 生效）→ **批次 24 的 shadcn 暗色系（zinc 底 + 品牌蓝 + 光感泛光）首次拿到像素级证据**：`docs/preview-批次26-首页未连接.jpg` / `docs/preview-批次26-配对引导页.jpg`。**结论：模拟器视觉验收不需要签名**，批次 24 的视觉债就此清零 |
+| 预览渲染 | ⚠️ 未恢复 | 新 SDK 预览产物布局变了：JS 产物在 `loader_out/default/ets`（旧版 `assets/default/ets`），且无 `config/buildConfig.json`（`-cjp` 已移除）——脚本已按新布局更新。但引擎启动后仍缺系统 abc（`rpc.abc` / `windowstage.abc` 在整个 DevEco 安装里都不存在；SDK 26 预览器面向 API 20+/ark24，工程是 API 12）→ 预览通道需 API 12 兼容的旧 SDK。**但模拟器通道已可用，预览渲染不再是瓶颈** |
+| S1/S2/S4 全链路 | ⚠️ 待桌面端 | 模拟器侧就绪，但场景清单的 S1（扫码配对）/S2（外出批准）/S4（断网恢复）需要**电脑端 ZCode server** 在跑（本机无该进程、无 `E:\zcode-dev-data` 启动脚本、ZCode 仓未装依赖）→ 需先起 server |
+| 门禁 | ✅ 33/33 + smoke | 本批为构建链修复，不触协议门禁；一致性门禁结果维持不变 |
+
 ## 11. 下一步（按顺序）
 
-1. 装回 DevEco Studio / SDK，重跑 `assembleHap` 与预览渲染，恢复「构建 + 视觉」两条验证链（批次 24 的 shadcn 视觉验收正卡在此）；
-2. 真机批：按 `docs/scene-checklist.md` 补跑批次 21/22 欠账 + 批次 24 视觉验收，产出 6.3 表实测数据；
-3. 批次 26+：shadcn 铺开 SessionList/Settings/Pairing、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2）；
-4. 确认 §9 的 Q1-Q4（Q3 已按批次 16 的 ask→plan 口径落地，Q1/Q2/Q4 仍待产品/架构确认）；
-5. 本计划随里程碑推进滚动更新（每 Epic 准出时回写状态）。
+1. **用户侧一次性动作**：DevEco → File → Project Structure → Signing Configs → 自动生成签名（需登录华为账号）→ 本机 HAP 即可安装到模拟器/真机；
+2. 模拟器/真机批：按 `docs/scene-checklist.md` 补跑批次 21/22 欠账 + 批次 24 视觉验收，产出 6.3 表实测数据；
+3. 预览通道二选一：装回 API 12 兼容的 DevEco（4.x）专供预览渲染，或接受「视觉验收只在模拟器/真机做」；
+4. 批次 27+：shadcn 铺开 SessionList/Settings/Pairing、ZSheet/ZDialog/ZTabs/ZToast、浅色主题（M2）；
+5. 确认 §9 的 Q1-Q4（Q3 已按批次 16 的 ask→plan 口径落地，Q1/Q2/Q4 仍待产品/架构确认）；
+6. 本计划随里程碑推进滚动更新（每 Epic 准出时回写状态）。

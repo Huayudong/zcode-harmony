@@ -22,8 +22,10 @@ const ENGINE_LOG = ROOT + '/entry/' + BUILD_ROOT + '/engine.log';
 
 function findDevEco() {
   const candidates = [
+    'D:/DevEco Studio',
     'D:/Huawei/DevEco Studio',
     'C:/Program Files/Huawei/DevEco Studio',
+    'C:/Program Files/DevEco Studio',
     process.env.USERPROFILE ? process.env.USERPROFILE + '/Huawei/DevEco Studio' : null,
   ].filter(Boolean);
   for (const c of candidates) {
@@ -33,13 +35,15 @@ function findDevEco() {
 }
 
 function engineArgs(pageUrl) {
+  // SDK 26 预览产物布局：JS 产物在 loader_out/default/ets（modules.abc），
+  // 无 config/buildConfig.json（-cjp 已移除）。用旧 SDK 12 布局会报
+  // "Launch -j parameters abnormal! Js app path not exist."
   return [
     '-refresh', 'region', '-projectID', 'zctool', '-ts', 'trace_zctool_commandPipe',
     '-rt', P + '/default/intermediates/res/default/ResourceTable.txt',
     '-rp', P + '/default/intermediates/res/default',
-    '-cjp', P + '/config/buildConfig.json',
     '-r', 'Module',
-    '-j', P + '/default/intermediates/assets/default/ets',
+    '-j', P + '/default/intermediates/loader_out/default/ets',
     '-ljPath', P + '/default/intermediates/loader/default/loader.json',
     '-s', 'zctool_pipe', '-device', 'phone', '-shape', 'rect', '-sd', '480',
     '-or', '1080', '2340', '-cr', '360', '780',
@@ -47,7 +51,7 @@ function engineArgs(pageUrl) {
     '-d', '', '-abn', 'FakeUIAbility',
     '-abp', '@normalized:N&&&entry/' + BUILD_ROOT + '/fakeuiability/FakeUIAbility&',
     '-arp', P + '/default/intermediates/res/default',
-    '-hsp', (DEVECO ? DEVECO : 'D:/Huawei/DevEco Studio') + '/sdk/default/hms/previewer',
+    '-hsp', (DEVECO ? DEVECO : 'D:/DevEco Studio') + '/sdk/default/hms/previewer',
     '-cpm', 'false',
   ];
 }

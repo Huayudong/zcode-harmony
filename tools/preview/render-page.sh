@@ -1,36 +1,25 @@
 #!/bin/bash
 # 逐页预览渲染：重生成 FakeUIAbility(loadContent 指向目标页) → PreviewBuild → 引擎渲染 → 抓帧
 #
-# 仓库路径按脚本自身位置推导；DevEco Studio 路径按候选顺序探测（可用 DEVECO_HOME 覆盖）。
+# 仓库路径按脚本自身位置推导；DevEco/SDK 环境复用 tools/deveco-env.sh（含影子 SDK）。
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_WIN="$(cygpath -w "$REPO_ROOT")"
 
-find_deveco() {
-  if [ -n "${DEVECO_HOME:-}" ] && [ -d "${DEVECO_HOME}" ]; then
-    echo "${DEVECO_HOME}"; return
-  fi
-  for c in "D:/Huawei/DevEco Studio" "C:/Program Files/Huawei/DevEco Studio" "$HOME/Huawei/DevEco Studio"; do
-    if [ -d "$c" ]; then echo "$c"; return; fi
-  done
-  echo ""
-}
+# shellcheck source=../deveco-env.sh
+source "$REPO_ROOT/tools/deveco-env.sh" || exit 1
 
-DEVECO="$(find_deveco)"
-if [ -z "$DEVECO" ]; then
-  echo "❌ 未找到 DevEco Studio（设 DEVECO_HOME 指向安装目录）"; exit 1
-fi
-
-ENGINE="$DEVECO/sdk/default/openharmony/previewer/common/bin/Previewer.exe"
-DEVECO_NODE="$DEVECO/tools/node/node.exe"
-HVIGORW="$DEVECO/tools/hvigor/bin/hvigorw.js"
+ENGINE="$DEVECO_HOME/sdk/default/openharmony/previewer/common/bin/Previewer.exe"
 FAKE="$REPO_ROOT/entry/.preview/fakeuiability/FakeUIAbility.ets"
 BUILD_LOG="$REPO_ROOT/entry/.preview/build.log"
 
+# 预览产物根（首次跑没有，必须先建，否则 FakeUIAbility 与 build.log 无处落盘）
+mkdir -p "$(dirname "$FAKE")" "$(dirname "$BUILD_LOG")"
+
 run_preview_build() {
   cd "$REPO_ROOT" || return 1
-  DEVECO_SDK_HOME="$DEVECO/sdk" "$DEVECO_NODE" \
+  "$DEVECO_NODE" \
     "$HVIGORW" --mode module -p module=entry@default -p product=default \
     -p pageType=page -p compileResInc=true -p previewMode=true -p buildRoot=.preview PreviewBuild --no-daemon \
     > "$BUILD_LOG" 2>&1
@@ -91,17 +80,20 @@ EOF
     continue
   fi
   taskkill //IM Previewer.exe //F >/dev/null 2>&1; sleep 1
+  # SDK 26 预览产物布局：JS 产物在 loader_out/default/ets（modules.abc），
+  # 无 config/buildConfig.json（-cjp 已移除）。用旧 SDK 12 布局会报
+  # "Launch -j parameters abnormal! Js app path not exist."
   ("$ENGINE" -refresh region -projectID zc5 -ts trace_zc5_commandPipe \
     -rt "${REPO_WIN}\\entry\\.preview\\default\\intermediates\\res\\default\\ResourceTable.txt" \
     -rp "${REPO_WIN}\\entry\\.preview\\default\\intermediates\\res\\default" \
-    -cjp "${REPO_WIN}\\entry\\.preview\\config\\buildConfig.json" -r Module \
-    -j "${REPO_WIN}\\entry\\.preview\\default\\intermediates\\assets\\default\\ets" \
+    -r Module \
+    -j "${REPO_WIN}\\entry\\.preview\\default\\intermediates\\loader_out\\default\\ets" \
     -ljPath "${REPO_WIN}\\entry\\.preview\\default\\intermediates\\loader\\default\\loader.json" \
     -s zc5_pipe -device phone -shape rect -sd 480 -or 1080 2340 -cr 360 780 -n entry -url "$URL" \
     -av ACE_2_0 -pm Stage -pages main_pages -d "" -abn FakeUIAbility \
     -abp "@normalized:N&&&entry/.preview/fakeuiability/FakeUIAbility&" \
     -arp "${REPO_WIN}\\entry\\.preview\\default\\intermediates\\res\\default" \
-    -hsp "$(cygpath -w "$DEVECO/sdk/default/hms/previewer")" -cpm false >/dev/null 2>&1 &)
+    -hsp "$(cygpath -w "$DEVECO_HOME/sdk/default/hms/previewer")" -cpm false >/dev/null 2>&1 &)
   sleep 13
   echo "== [$NAME] grabbing..."
   # 前台抓帧：脚本内部自动发现引擎端口、收集 8s 帧后自退（引擎先起，无需 wait）
