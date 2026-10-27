@@ -13,7 +13,15 @@ import {
   SessionsPullError
 } from 'connection';
 import type { WorkspaceTarget } from 'protocol';
-import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import {
+  LightBloomButton,
+  ZcodeColors,
+  StatusDot,
+  StatusTone,
+  ZButton,
+  ZButtonSize,
+  ZButtonVariant,
+} from 'uikit';
 
 type CheckStatus = 'pending' | 'running' | 'pass' | 'fail';
 
@@ -213,13 +221,14 @@ struct PairingSelfCheck {
           }
         })
 
-        Text('返回')
-          .fontSize(13)
-          .fontColor(ZcodeColors.textSecondary())
-          .margin({ top: 18 })
-          .onClick(() => {
-            router.back({ url: 'pages/Index' });
-          })
+        ZButton({
+          label: '返回',
+          variant: ZButtonVariant.GHOST,
+          btnSize: ZButtonSize.SM,
+          onTap: () => {
+            router.back();
+          },
+        })
       }
       .margin({ bottom: 32 })
     }

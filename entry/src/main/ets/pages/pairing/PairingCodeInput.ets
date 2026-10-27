@@ -15,7 +15,14 @@ import {
   parsePairLink,
   pemFromDerBase64
 } from 'connection';
-import { hilog } from '@kit.PerformanceAnalysisKit';import { LightBloomButton, ZcodeColors } from 'uikit';
+import { hilog } from '@kit.PerformanceAnalysisKit';import {
+  LightBloomButton,
+  ZcodeColors,
+  ZButton,
+  ZButtonSize,
+  ZButtonVariant,
+  ZInput,
+} from 'uikit';
 
 /** 深链解析结果的展示摘要。 */
 interface ParsedSummary {
@@ -230,12 +237,16 @@ struct PairingCodeInput {
   build() {
     Column() {
       Row() {
-        Text('←')
-          .fontSize(22)
-          .fontColor(ZcodeColors.textSecondary())
-          .onClick(() => {
+        ZButton({
+          label: '←',
+          variant: ZButtonVariant.GHOST,
+          btnSize: ZButtonSize.ICON,
+          iconExtent: 36,
+          fontSize: 20,
+          onTap: () => {
             router.back();
-          })
+          },
+        })
       }
       .width('100%')
       .padding({ left: 20, top: 16 })
@@ -275,43 +286,37 @@ struct PairingCodeInput {
             .fontSize(11)
             .fontColor(ZcodeColors.textTertiary())
             .margin({ top: 6, bottom: 4 })
-          TextInput({ text: this.manualName })
-            .fontSize(13)
-            .fontColor(ZcodeColors.textPrimary())
-            .backgroundColor(ZcodeColors.card())
-            .borderRadius(12)
-            .height(44)
-            .onChange((value: string) => {
+          ZInput({
+            value: this.manualName,
+            fontSize: 13,
+            onValueChange: (value: string) => {
               this.manualName = value;
-            })
+            },
+          })
 
           Text('地址（host:port）')
             .fontSize(11)
             .fontColor(ZcodeColors.textTertiary())
             .margin({ top: 10, bottom: 4 })
-          TextInput({ text: this.manualAddress })
-            .fontSize(13)
-            .fontColor(ZcodeColors.textPrimary())
-            .backgroundColor(ZcodeColors.card())
-            .borderRadius(12)
-            .height(44)
-            .onChange((value: string) => {
+          ZInput({
+            value: this.manualAddress,
+            fontSize: 13,
+            onValueChange: (value: string) => {
               this.manualAddress = value;
-            })
+            },
+          })
 
           Text('配对码')
             .fontSize(11)
             .fontColor(ZcodeColors.textTertiary())
             .margin({ top: 10, bottom: 4 })
-          TextInput({ text: this.manualToken })
-            .fontSize(13)
-            .fontColor(ZcodeColors.textPrimary())
-            .backgroundColor(ZcodeColors.card())
-            .borderRadius(12)
-            .height(44)
-            .onChange((value: string) => {
+          ZInput({
+            value: this.manualToken,
+            fontSize: 13,
+            onValueChange: (value: string) => {
               this.manualToken = value;
-            })
+            },
+          })
 
           if (this.summary !== null) {
             Column({ space: 6 }) {
@@ -332,16 +337,13 @@ struct PairingCodeInput {
             .margin({ top: 14 })
           }
 
-          TextInput({ text: this.deviceName })
-            .fontSize(13)
-            .fontColor(ZcodeColors.textPrimary())
-            .backgroundColor(ZcodeColors.card())
-            .borderRadius(12)
-            .height(44)
-            .margin({ top: 14 })
-            .onChange((value: string) => {
+          ZInput({
+            value: this.deviceName,
+            fontSize: 13,
+            onValueChange: (value: string) => {
               this.deviceName = value;
-            })
+            },
+          })
 
           if (this.formError.length > 0) {
             Text(this.formError)

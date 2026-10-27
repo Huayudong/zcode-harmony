@@ -1,7 +1,7 @@
 import router from '@ohos.router';
 import { ConnectionProfile, ProfileStore } from 'connection';
 import { PerfMarks } from 'utils';
-import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import { LightBloomButton, ZcodeColors, StatusDot, StatusTone, ZToastHost } from 'uikit';
 
 /**
  * 首页：未连接态（ONB-1 入口）与已配对档案态。
@@ -39,7 +39,8 @@ struct Index {
   }
 
   build() {
-    Column() {
+    Stack() {
+      Column() {
       Text('ZCode Harmony')
         .fontSize(28)
         .fontWeight(FontWeight.Bold)
@@ -117,10 +118,16 @@ struct Index {
         .fontSize(11)
         .fontColor(ZcodeColors.textTertiary())
         .margin({ bottom: 24 })
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(ZcodeColors.background())
+      .alignItems(HorizontalAlign.Center)
+
+      // 全局轻提示宿主（shadcn Sonner 语义）
+      ZToastHost()
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZcodeColors.background())
-    .alignItems(HorizontalAlign.Center)
   }
 }

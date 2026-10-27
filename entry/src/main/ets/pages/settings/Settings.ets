@@ -1,5 +1,4 @@
 import router from '@ohos.router';
-import { promptAction } from '@kit.ArkUI';
 import {
   WorkbenchController,
   ProfileStore,
@@ -7,7 +6,19 @@ import {
   type ConnectionStateEvent,
   type NotificationLevel
 } from 'connection';
-import { ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import {
+  ZcodeColors,
+  DesignTokens,
+  StatusDot,
+  StatusTone,
+  ZBadge,
+  ZBadgeVariant,
+  ZButton,
+  ZButtonSize,
+  ZButtonVariant,
+  ZDialog,
+  ZToast,
+} from 'uikit';
 
 /**
  * 设置页（A9 基础项，PRD 4.7 P0）：通知分级 / Server 档案管理 / 连接诊断 / 缓存清理。
@@ -23,6 +34,7 @@ struct Settings {
   @State pendingCommands: number = 0;
   @State watermarkCount: number = 0;
   @State busy: boolean = false;
+  @State confirmClearCache: boolean = false;
   private controller: WorkbenchController | null = null;
 
   aboutToAppear(): void {
@@ -47,7 +59,7 @@ struct Settings {
     if (this.controller !== null) {
       await this.controller.setNotificationLevel(level);
     }
-    promptAction.showToast({ message: '通知分级已更新' });
+    ZToast.show('通知分级已更新');
   }
 
   private async activateProfile(profile: ConnectionProfile): Promise<void> {
@@ -63,9 +75,9 @@ struct Settings {
         await this.controller.restart();
         this.stateEvent = this.controller.getStateEvent();
       }
-      promptAction.showToast({ message: `已切换到 ${profile.name}` });
+      ZToast.show(`已切换到 ${profile.name}`);
     } catch (error) {
-      promptAction.showToast({ message: `切换失败：${String(error)}` });
+      ZToast.show(`切换失败：${String(error)}`);
     }
     this.busy = false;
   }
@@ -74,8 +86,9 @@ struct Settings {
     if (this.controller === null) {
       return;
     }
+    this.confirmClearCache = false;
     await this.controller.clearLocalCache();
-    promptAction.showToast({ message: '本地会话缓存与草稿已清除' });
+    ZToast.show('本地会话缓存与草稿已清除');
   }
 
   private levelLabel(level: NotificationLevel): string {
@@ -90,26 +103,30 @@ struct Settings {
 
   @Builder
   LevelChip(value: NotificationLevel) {
-    Text(this.levelLabel(value))
-      .fontSize(13)
-      .fontColor(this.notifyLevel === value ? '#FFFFFF' : ZcodeColors.textSecondary())
-      .backgroundColor(this.notifyLevel === value ? ZcodeColors.BRAND : ZcodeColors.SURFACE)
-      .padding({ left: 14, right: 14, top: 6, bottom: 6 })
-      .borderRadius(999)
-      .onClick(() => {
+    ZButton({
+      label: this.levelLabel(value),
+      variant: this.notifyLevel === value ? ZButtonVariant.DEFAULT : ZButtonVariant.OUTLINE,
+      btnSize: ZButtonSize.SM,
+      onTap: () => {
         void this.setLevel(value);
-      })
+      },
+    })
   }
 
   build() {
-    Column() {
+    Stack() {
+      Column() {
       Row({ space: 10 }) {
-        Text('‹')
-          .fontSize(22)
-          .fontColor(ZcodeColors.textSecondary())
-          .onClick(() => {
+        ZButton({
+          label: '‹',
+          variant: ZButtonVariant.GHOST,
+          btnSize: ZButtonSize.ICON,
+          iconExtent: 36,
+          fontSize: 22,
+          onTap: () => {
             router.back();
-          })
+          },
+        })
         Text('设置')
           .fontSize(17)
           .fontWeight(FontWeight.Medium)
@@ -142,17 +159,16 @@ struct Settings {
               }
               .alignItems(HorizontalAlign.Start)
               .layoutWeight(1)
-              Button('重连')
-                .fontSize(12)
-                .fontColor('#FFFFFF')
-                .backgroundColor(ZcodeColors.BRAND)
-                .borderRadius(8)
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .onClick(() => {
+              ZButton({
+                label: '重连',
+                variant: ZButtonVariant.DEFAULT,
+                btnSize: ZButtonSize.SM,
+                onTap: () => {
                   if (this.controller !== null) {
                     this.controller.retry();
                   }
-                })
+                },
+              })
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)
@@ -182,16 +198,19 @@ struct Settings {
                 .layoutWeight(1)
 
                 if (profile.id === this.activeProfileId) {
-                  Text('当前活跃')
-                    .fontSize(11)
-                    .fontColor(ZcodeColors.SUCCESS)
+                  ZBadge({
+                    label: '当前活跃',
+                    variant: ZBadgeVariant.SUCCESS,
+                  })
                 } else {
-                  Text('设为活跃')
-                    .fontSize(12)
-                    .fontColor(ZcodeColors.BRAND_LIGHT)
-                    .onClick(() => {
+                  ZButton({
+                    label: '设为活跃',
+                    variant: ZButtonVariant.OUTLINE,
+                    btnSize: ZButtonSize.SM,
+                    onTap: () => {
                       void this.activateProfile(profile);
-                    })
+                    },
+                  })
                 }
               }
               .width('100%')
@@ -201,13 +220,15 @@ struct Settings {
               .backgroundColor(ZcodeColors.SURFACE)
             }, (profile: ConnectionProfile) => profile.id)
 
-            Text('重新配对新电脑 ›')
-              .fontSize(12)
-              .fontColor(ZcodeColors.BRAND_LIGHT)
-              .onClick(() => {
+            ZButton({
+              label: '重新配对新电脑 ›',
+              variant: ZButtonVariant.GHOST,
+              btnSize: ZButtonSize.SM,
+              onTap: () => {
                 router.pushUrl({ url: 'pages/pairing/PairingWelcome' }).catch(() => {});
-              })
-              .width('100%')
+              },
+            })
+            .width('100%')
           }
           .padding(14)
           .borderRadius(14)
@@ -253,15 +274,15 @@ struct Settings {
                 .fontColor(ZcodeColors.textTertiary())
             }
             .width('100%')
-            Button('清除本地会话缓存与草稿')
-              .fontSize(13)
-              .fontColor(ZcodeColors.DESTRUCTIVE)
-              .backgroundColor(ZcodeColors.SURFACE)
-              .borderRadius(10)
-              .width('100%')
-              .onClick(() => {
-                void this.clearCache();
-              })
+            ZButton({
+              label: '清除本地会话缓存与草稿',
+              variant: ZButtonVariant.OUTLINE,
+              btnSize: ZButtonSize.MD,
+              onTap: () => {
+                this.confirmClearCache = true;
+              },
+            })
+            .width('100%')
           }
           .padding(14)
           .borderRadius(14)
@@ -278,9 +299,44 @@ struct Settings {
       }
       .layoutWeight(1)
       .scrollBar(BarState.Off)
+
+      // 破坏性动作二次确认（shadcn AlertDialog 语义）
+      // 包裹层用原生 Stack：自定义 overlay 组件在 Stack 里按内容尺寸布局，
+      // 遮罩与居中由原生容器承担（ArkUI 自定义组件的百分比高度会退化成内容高度）。
+      if (this.confirmClearCache) {
+        Stack() {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(DesignTokens.SCRIM)
+            .onClick(() => {
+              this.confirmClearCache = false;
+            })
+          ZDialog({
+            title: '清除本地缓存',
+            message: '将删除本机缓存的会话列表与未发送草稿。服务器上的会话不受影响。',
+            confirmLabel: '清除',
+            cancelLabel: '取消',
+            destructive: true,
+            onConfirm: () => {
+              void this.clearCache();
+            },
+            onCancel: () => {
+              this.confirmClearCache = false;
+            },
+          }) {
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .alignContent(Alignment.Center)
+      }
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(ZcodeColors.background())
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZcodeColors.background())
   }
 }

@@ -2,7 +2,17 @@ import router from '@ohos.router';
 import { promptAction } from '@kit.ArkUI';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { isPairLink, type PairRouteParams } from 'connection';
-import { LightBloomButton, ZcodeColors, StatusDot, StatusTone } from 'uikit';
+import {
+  LightBloomButton,
+  ZcodeColors,
+  StatusDot,
+  StatusTone,
+  ZBadge,
+  ZBadgeVariant,
+  ZButton,
+  ZButtonSize,
+  ZButtonVariant,
+} from 'uikit';
 
 /**
  * 配对欢迎页（ONB-1/2）：扫码（Scan Kit 系统扫码页，无需自管相机权限）为首选，
@@ -53,12 +63,16 @@ struct PairingWelcome {
   build() {
     Column() {
       Row() {
-        Text('←')
-          .fontSize(22)
-          .fontColor(ZcodeColors.textSecondary())
-          .onClick(() => {
+        ZButton({
+          label: '←',
+          variant: ZButtonVariant.GHOST,
+          btnSize: ZButtonSize.ICON,
+          iconExtent: 36,
+          fontSize: 20,
+          onTap: () => {
             router.back();
-          })
+          },
+        })
       }
       .width('100%')
       .padding({ left: 20, top: 16 })
@@ -79,15 +93,20 @@ struct PairingWelcome {
       Column({ space: 12 }) {
         Row({ space: 8 }) {
           StatusDot({ tone: StatusTone.Success, dotSize: 10 })
-          Text('推荐扫码配对 · 也可粘贴链接或手动填写')
+          ZBadge({
+            label: '推荐',
+            variant: ZBadgeVariant.SUCCESS,
+          })
+          Text('扫码配对 · 也可粘贴链接或手动填写')
             .fontSize(12)
-            .fontColor(ZcodeColors.textTertiary())
+            .fontColor(ZcodeColors.textSecondary())
         }
         .alignItems(VerticalAlign.Center)
       }
       .padding(14)
       .borderRadius(12)
       .backgroundColor(ZcodeColors.card())
+      .border({ width: 1, color: ZcodeColors.BORDER })
       .margin({ bottom: 40 })
 
       Column({ space: 16 }) {
@@ -99,13 +118,15 @@ struct PairingWelcome {
           }
         })
 
-        LightBloomButton({
+        ZButton({
           label: '手动添加 / 粘贴链接',
-          destructive: false,
-          onAction: () => {
+          variant: ZButtonVariant.SECONDARY,
+          btnSize: ZButtonSize.LG,
+          onTap: () => {
             this.startManual();
-          }
+          },
         })
+        .width('100%')
       }
 
       Blank()
@@ -115,13 +136,15 @@ struct PairingWelcome {
           .fontSize(11)
           .fontColor(ZcodeColors.textTertiary())
           .textAlign(TextAlign.Center)
-        Text('无法直连？查看组网指引')
-          .fontSize(12)
-          .fontColor(ZcodeColors.BRAND_LIGHT)
-          .onClick(() => {
+        ZButton({
+          label: '无法直连？查看组网指引',
+          variant: ZButtonVariant.GHOST,
+          btnSize: ZButtonSize.SM,
+          onTap: () => {
             this.openNetworkGuide();
-          })
-          .margin({ bottom: 24 })
+          },
+        })
+        .margin({ bottom: 24 })
       }
     }
     .width('100%')
